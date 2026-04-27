@@ -56,6 +56,22 @@ Each analytics run should persist successful slices even if one Google Ads resou
 
 **Alternative considered:** all-or-nothing sync runs. Rejected because one transient Google Ads error would make the dashboard appear blind across all upload analytics.
 
+### D7: MarketingPage is the primary Google Ads attribution and performance surface; ConversionsPage remains the operational drilldown
+
+The existing `MarketingPage` component is currently a static mock. It will be reframed as the primary dashboard surface for Google Ads attribution and upload analytics. It will consume:
+
+- **Cached upload analytics snapshots** (from this change): attribution rate by conversion action, upload health badge, action-alive status, config drift alert, and platform health trends.
+- **Conversion candidate pipeline data** (from `vw_conversion_candidates`, available now): stage funnel counts and values, attributed revenue by stage (booked, qualified, converted), and attribution source breakdown.
+- **Google Ads campaign spend** (from `ads_campaign_stats`, available now): daily spend by campaign for cost-per-lead and ROAS-adjacent metrics.
+
+The channel table in the current mock is replaced by a Google Ads–scoped campaign performance view rather than a multi-platform spend comparison, because only Google Ads spend and attribution data is integrated in the current system.
+
+`ConversionsPage` keeps its existing role as the row-level operations console: it exposes individual conversion candidates, supports bulk upload actions, and shows per-row GCLID and upload status. It is not the home of executive-level health badges or trends.
+
+`AdminPage` retains system sync status and credential management but does not duplicate upload-analytics signals.
+
+**Alternative considered:** building a new dedicated analytics page. Rejected because `MarketingPage` already exists as the intended analytics surface, is currently unused mock data, and reusing its route and shell avoids introducing unnecessary navigation complexity.
+
 ## Risks / Trade-offs
 
 - [Attribution counts are only meaningful if these action IDs are dedicated to the offline upload pipeline] -> Limit the collector to configured action IDs and document that reusing those actions for other sources will distort attribution rate.
@@ -76,6 +92,6 @@ Each analytics run should persist successful slices even if one Google Ads resou
 
 ## Open Questions
 
-- Which dashboard surface should own the primary platform health badge and config drift alert: Conversions, Admin, or both?
+- ~~Which dashboard surface should own the primary platform health badge and config drift alert: Conversions, Admin, or both?~~ **Resolved (D7):** MarketingPage owns the primary health badge and attribution analytics. ConversionsPage owns operational drilldown. AdminPage owns sync controls.
 - Should the first deployment backfill 14 days or 30 days of attribution snapshots?
 - Should on-demand GCLID verification responses be cached for a short period, or always be live Google Ads reads?

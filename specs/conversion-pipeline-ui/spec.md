@@ -83,6 +83,17 @@ The table SHALL display a Source column showing how the estimate was booked.
 - **WHEN** `booking_source` is NULL
 - **THEN** the Source cell SHALL display a dash (—)
 
+### Requirement: Qualified stage cell displays estimate work_status
+The qualified stage cell in the pipeline strip SHALL display the estimate's raw `work_status` string as a sub-label beneath the status icon. The value is shown as-is (no condensing or mapping). This applies to both discovered and undiscovered qualified stages.
+
+#### Scenario: Qualified cell with complete work_status
+- **WHEN** the estimate has `work_status = 'complete rated'`
+- **THEN** the qualified stage cell SHALL render "complete rated" as a sub-label beneath the status icon
+
+#### Scenario: Qualified cell with null work_status
+- **WHEN** `estimate_work_status` is NULL
+- **THEN** no sub-label is rendered in the qualified cell
+
 ### Requirement: Action buttons preserved
 The page header SHALL retain the Scan Now, Upload Pending, Settings, and Refresh buttons with existing behavior.
 

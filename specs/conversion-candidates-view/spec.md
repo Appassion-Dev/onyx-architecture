@@ -26,15 +26,15 @@ The system SHALL resolve each estimate's associated job (via `estimate_options -
 - **WHEN** multiple jobs reference options on the same estimate
 - **THEN** the view returns the most recently created job's fields (ORDER BY `jobs.created_at DESC LIMIT 1`)
 
-### Requirement: View exposes display_value as sum of approved options
-The system SHALL compute `display_value` as `SUM(estimate_options.total_amount) / 100.0` where `approval_status IN ('approved', 'pro approved')`. When no approved options exist, `display_value` SHALL be `0`.
+### Requirement: View exposes display_value as average of all options
+The system SHALL compute `display_value` as `AVG(estimate_options.total_amount) / 100.0` across ALL options on the estimate, regardless of approval status. When no options exist, `display_value` SHALL be `0`.
 
-#### Scenario: Estimate with approved options
-- **WHEN** an estimate has one or more options with `approval_status = 'approved'` or `'pro approved'`
-- **THEN** `display_value` equals the sum of those options' `total_amount` divided by 100
+#### Scenario: Estimate with options
+- **WHEN** an estimate has one or more `estimate_options` rows
+- **THEN** `display_value` equals the average of all options' `total_amount` divided by 100
 
-#### Scenario: Estimate with no approved options
-- **WHEN** no options on the estimate have an approved status
+#### Scenario: Estimate with no options
+- **WHEN** no `estimate_options` rows exist for the estimate
 - **THEN** `display_value` is `0`
 
 ### Requirement: View exposes source signals for every estimate

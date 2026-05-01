@@ -1,15 +1,15 @@
 ## Requirements
 
 ### Requirement: Connected pipeline strip
-The Booking, Qualified, and Converted columns SHALL be rendered as a connected 3-phase pipeline strip with visual connectors between phases showing progression flow.
+The Booking, Qualified, and Converted stage cells SHALL be rendered as three independent cells with no connector lines between them. Since all three stages are fully independent events (not a linear progression), the connected-strip metaphor is removed.
 
 #### Scenario: All three phases present
 - **WHEN** an estimate has booking, qualified, and converted stages
-- **THEN** three phase cells are rendered in sequence with connector lines between them
+- **THEN** three phase cells are rendered side by side with no connector lines between them
 
-#### Scenario: Only booking phase present
+#### Scenario: Only one phase present
 - **WHEN** an estimate has only a booking_lead upload
-- **THEN** the booking phase is rendered with status, and the remaining phases show as empty/inactive with dimmed connectors
+- **THEN** the booking phase is rendered with status, and the remaining phases show as empty/inactive (no connectors)
 
 ### Requirement: Phase status visualization
 Each pipeline phase cell SHALL display a colored background and icon that communicates the upload status at a glance.

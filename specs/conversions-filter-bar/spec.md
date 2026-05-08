@@ -19,27 +19,24 @@ The Conversions page SHALL provide a "Step" dropdown that filters the visible es
 - **WHEN** the Step dropdown is set to "Closed"
 - **THEN** only estimates where `is_closed = true` are shown
 
-### Requirement: Filter by source
-The Conversions page SHALL provide a "Source" dropdown that filters estimates to those with a matching value in their `callrail_sources` array. Options are computed dynamically from all distinct source values in the loaded dataset.
+### Requirement: Filter by channel
+The Conversions page SHALL provide a "Channel" dropdown that filters estimates to those with a matching `channel` value. Options are the seven taxonomy channel names: All, Google Ads, GLS, GMB, Thumbtack, Organic, Direct, Other.
 
-#### Scenario: Dynamic options reflect loaded data
-- **WHEN** the Conversions page loads its 90-day dataset
-- **THEN** the Source dropdown options contain all distinct non-null values from `callrail_sources` across all rows, plus an "All" option
+#### Scenario: Default state
+- **WHEN** the Channel dropdown is set to "All"
+- **THEN** all estimates in the 90-day window are shown regardless of channel
 
-#### Scenario: Source filter applied
-- **WHEN** user selects a specific source (e.g., "Google Ads")
-- **THEN** only estimates whose `callrail_sources` array contains that value are shown
+#### Scenario: Filter to Google Ads
+- **WHEN** user selects "Google Ads" from the Channel dropdown
+- **THEN** only estimates where `channel = 'Google Ads'` are shown
 
-### Requirement: Filter by first-touch medium
-The Conversions page SHALL provide a "Medium" dropdown with options: All, Form, Call. The medium value comes from the `first_touch_medium` column on each estimate row.
+#### Scenario: Filter to GLS
+- **WHEN** user selects "GLS" from the Channel dropdown
+- **THEN** only estimates where `channel = 'GLS'` are shown
 
-#### Scenario: Filter to form medium
-- **WHEN** the Medium dropdown is set to "Form"
-- **THEN** only estimates where `first_touch_medium = 'form'` are shown
-
-#### Scenario: Filter to call medium
-- **WHEN** the Medium dropdown is set to "Call"
-- **THEN** only estimates where `first_touch_medium = 'call'` are shown
+#### Scenario: Filter to Other
+- **WHEN** user selects "Other" from the Channel dropdown
+- **THEN** only estimates where `channel = 'Other'` are shown
 
 ### Requirement: Filter by campaign
 The Conversions page SHALL provide a "Campaign" dropdown that filters estimates to those with a matching value in their `callrail_campaigns` array. Options are computed dynamically from all distinct campaign values in the loaded dataset.

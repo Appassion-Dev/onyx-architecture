@@ -77,3 +77,10 @@ The system SHALL NOT bake a time filter into `vw_conversion_candidates`. The fro
 #### Scenario: Dashboard loads with 90-day window
 - **WHEN** `ConversionsPage` fetches from `vw_conversion_candidates`
 - **THEN** the query includes `.gte('estimate_created_at', now minus 90 days)` and returns only estimates created within that window
+
+### Requirement: Reconciliation view schema is aligned with channel taxonomy
+The `vw_gads_upload_reconciliation_daily` view SHALL NOT contain any source-bucket aggregation columns. The view's schema SHALL consist solely of: `event_key`, `event_label`, `event_sort_order`, `conversion_action_id`, `conversion_action_name`, `reporting_date`, `local_uploaded_count`, `gclid_count`, `amount`, `google_successful_count`, `google_failed_count`, `has_local_data`, `has_google_data`, and `latest_google_synced_at`.
+
+#### Scenario: SELECT * returns no bucket columns
+- **WHEN** `SELECT * FROM vw_gads_upload_reconciliation_daily` is executed
+- **THEN** the result set contains no columns named `form_*`, `calls_*`, `thumbtack_*`, or `other_*`

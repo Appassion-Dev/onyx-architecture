@@ -1,57 +1,43 @@
-## Requirements
+## REMOVED Requirements
+
+### Requirement: Filter by conversion step (All and Closed options)
+**Reason**: The step selector is now a required conversion mode, not an optional filter. "All" has no coherent date or value context. "Closed" is a derived state (all stages uploaded/skipped) not a conversion type.
+**Migration**: Users who previously used "All" should use the "Qualified" mode as the default working view. Users who previously used "Closed" can identify closed estimates by their uploaded status badges within any mode tab.
+
+## MODIFIED Requirements
 
 ### Requirement: Filter by conversion step
-The Conversions page SHALL provide a "Step" dropdown that filters the visible estimates by funnel stage. Options are: All, Pre-discovery, Has Booking, Has Qualified, Has Converted, Closed. Filters are inclusive ("has at least this stage"). All filters apply in AND combination with other active filters.
+The Conversions page SHALL provide a step selector that sets the active conversion mode. The selector SHALL present four options: Pre-discovery, Booking, Qualified, Converted. There is no "All" or "Closed" option. The selector is always active (there is no unset/default-all state); the default is Qualified on page load.
 
-#### Scenario: No filter applied
-- **WHEN** the Step dropdown is set to "All"
-- **THEN** all estimates in the 90-day window are shown
+#### Scenario: Step selector options
+- **WHEN** the Conversions page renders the step selector
+- **THEN** it SHALL show exactly four tabs: Pre-discovery, Booking, Qualified, Converted
+- **AND** there SHALL be no "All" or "Closed" tab
+
+#### Scenario: Default mode on page load
+- **WHEN** the Conversions page first loads
+- **THEN** the Qualified tab SHALL be active
 
 #### Scenario: Filter to pre-discovery
-- **WHEN** the Step dropdown is set to "Pre-discovery"
+- **WHEN** the user selects Pre-discovery
 - **THEN** only estimates where all three stage columns are NULL are shown
+- **AND** the hierarchy groups by `estimate_created_at`
 
 #### Scenario: Filter to has-booking
-- **WHEN** the Step dropdown is set to "Has Booking"
+- **WHEN** the user selects Booking
 - **THEN** only estimates where `booking_status IS NOT NULL` are shown
+- **AND** the hierarchy groups by `booking_datetime`
 
-#### Scenario: Filter to closed
-- **WHEN** the Step dropdown is set to "Closed"
-- **THEN** only estimates where `is_closed = true` are shown
+#### Scenario: Filter to has-qualified
+- **WHEN** the user selects Qualified
+- **THEN** only estimates where `qualified_status IS NOT NULL` are shown
+- **AND** the hierarchy groups by `qualified_datetime`
 
-### Requirement: Filter by channel
-The Conversions page SHALL provide a "Channel" dropdown that filters estimates to those with a matching `channel` value. Options are the seven taxonomy channel names: All, Google Ads, GLS, GMB, Thumbtack, Organic, Direct, Other.
+#### Scenario: Filter to has-converted
+- **WHEN** the user selects Converted
+- **THEN** only estimates where `converted_status IS NOT NULL` are shown
+- **AND** the hierarchy groups by `converted_datetime`
 
-#### Scenario: Default state
-- **WHEN** the Channel dropdown is set to "All"
-- **THEN** all estimates in the 90-day window are shown regardless of channel
-
-#### Scenario: Filter to Google Ads
-- **WHEN** user selects "Google Ads" from the Channel dropdown
-- **THEN** only estimates where `channel = 'Google Ads'` are shown
-
-#### Scenario: Filter to GLS
-- **WHEN** user selects "GLS" from the Channel dropdown
-- **THEN** only estimates where `channel = 'GLS'` are shown
-
-#### Scenario: Filter to Other
-- **WHEN** user selects "Other" from the Channel dropdown
-- **THEN** only estimates where `channel = 'Other'` are shown
-
-### Requirement: Filter by campaign
-The Conversions page SHALL provide a "Campaign" dropdown that filters estimates to those with a matching value in their `callrail_campaigns` array. Options are computed dynamically from all distinct campaign values in the loaded dataset.
-
-#### Scenario: Campaign filter applied
-- **WHEN** user selects a specific campaign name
-- **THEN** only estimates whose `callrail_campaigns` array contains that value are shown
-
-### Requirement: Filter by assigned employee
-The Conversions page SHALL provide an "Assignee" dropdown that filters estimates by `assigned_employee_id`. Options are loaded from `useEmployees()` and rendered with `EmployeeBadge` (colored dot + name).
-
-#### Scenario: Assignee filter applied
-- **WHEN** user selects an employee from the Assignee dropdown
-- **THEN** only estimates where `assigned_employee_id` matches the selected employee are shown
-
-#### Scenario: Unassigned estimates
-- **WHEN** user selects "Unassigned"
-- **THEN** only estimates where `assigned_employee_id IS NULL` are shown
+#### Scenario: Reset filters restores default mode
+- **WHEN** the user activates Reset Filters
+- **THEN** the step selector SHALL return to Qualified (not "All")

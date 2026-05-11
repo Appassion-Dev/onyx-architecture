@@ -3,9 +3,16 @@ name: OpenSpec Change Notification
 on:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      files:
+        description: "Space-separated list of files to simulate as changed (e.g. specs/full-stack-architecture/spec.md)"
+        required: true
+        default: "specs/full-stack-architecture/spec.md"
 
 permissions:
   contents: read
+  models: read
 
 jobs:
   notify:
@@ -17,7 +24,12 @@ jobs:
 
       - name: Get changed files
         id: diff
-        run: git diff --name-only HEAD~1 HEAD > /tmp/changed_files.txt
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "${{ github.event.inputs.files }}" | tr ' ' '\n' > /tmp/changed_files.txt
+          else
+            git diff --name-only HEAD~1 HEAD > /tmp/changed_files.txt
+          fi
 
       - name: Send OpenSpec notification
         env:

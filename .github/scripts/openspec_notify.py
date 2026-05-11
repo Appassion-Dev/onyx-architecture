@@ -138,7 +138,7 @@ SYSTEM_PROMPT = """\
 You are a technical writer summarizing changes to a software specification \
 repository for non-technical stakeholders. Be concise (2-4 sentences max \
 per summary). Focus on WHAT is changing and WHY it matters to the product, \
-not implementation details. Write in plain English."""
+not implementation details. Write in Russian."""
 
 
 def summarize_proposals(files: list[str]) -> str:

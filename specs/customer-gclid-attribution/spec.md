@@ -30,16 +30,37 @@ Both `discover_pending_conversions()` (batch cron) and `discover_pending_convers
 - **WHEN** an estimate has `customer_id IS NULL`
 - **THEN** no row is inserted into `customer_gclids` for that estimate and processing continues without error
 
-### Requirement: GCLID resolution for upload uses customer_gclids with first-touch ordering
-When qualified_lead or converted_lead detection functions resolve a GCLID, the system SHALL query `customer_gclids` for the estimate's `customer_id`, ordered by `first_seen_at ASC`, and take the first result (first-touch attribution). If no row exists in `customer_gclids` for the customer, the GCLID SHALL be NULL.
+### Requirement: GCLID resolution for upload uses customer_gclids with first-touch ordering within the click lookback window
+When qualified_lead or converted_lead detection functions resolve a GCLID, the system SHALL query `customer_gclids` for the estimate's `customer_id`, filtered to rows where `first_seen_at >= conversion_datetime - INTERVAL '90 days'`, ordered by `first_seen_at ASC`, and take the first result (first-touch attribution). The reference point for the 90-day window is the conversion event timestamp (`e.updated_at` for qualified_lead; `MAX(approved option updated_at)` for converted_lead), not the upload time. If no row exists within the window, the GCLID SHALL be NULL.
 
-#### Scenario: Customer has a prior GCLID from a different estimate
-- **WHEN** a customer's first estimate came via an ad (GCLID recorded) and a second estimate is being discovered
+The 90-day constant mirrors the maximum allowed `click_through_lookback_window_days` in Google Ads. GCLIDs older than 90 days relative to the conversion event are rejected by the Ads API and must not be selected.
+
+#### Scenario: Customer has a prior GCLID from a different estimate — within window
+- **WHEN** a customer's first estimate came via an ad (GCLID recorded, `first_seen_at` within 90 days of the conversion event) and a second estimate is being discovered
 - **THEN** the second estimate's qualified or converted conversion row receives the GCLID from the first estimate via `customer_gclids`
+
+#### Scenario: Customer has a GCLID outside the lookback window
+- **WHEN** the only GCLID in `customer_gclids` for a customer has `first_seen_at` more than 90 days before the conversion event
+- **THEN** that GCLID is excluded and the discovered conversion row has `gclid = NULL`; the row proceeds via enhanced conversions
+
+#### Scenario: Customer has both a stale GCLID and a recent GCLID — recent is selected
+- **WHEN** a customer has two rows in `customer_gclids`, one with `first_seen_at` older than 90 days before the conversion event and one within 90 days
+- **THEN** only the within-window row is eligible; `ORDER BY first_seen_at ASC LIMIT 1` selects the oldest eligible (first-touch within window) GCLID
 
 #### Scenario: Customer has no GCLID in customer_gclids
 - **WHEN** no row exists in `customer_gclids` for the estimate's customer
 - **THEN** the discovered conversion row has `gclid = NULL`; the row is still discovered as pending and relies on enhanced conversions for attribution
+
+### Requirement: Stale pending rows with out-of-window GCLIDs are remediated
+Existing `pending` rows in `gads_conversion_uploads` that were discovered with a GCLID whose `first_seen_at` in `customer_gclids` exceeds 90 days before `conversion_datetime` SHALL have their `gclid` set to NULL. The `status` SHALL remain `pending`, allowing the upload phase to retry via the enhanced conversion path.
+
+#### Scenario: Cleanup migration identifies affected rows
+- **WHEN** the cleanup migration runs
+- **THEN** all `pending` rows where `customer_gclids.first_seen_at < conversion_datetime - INTERVAL '90 days'` are identified via the JOIN `estimates → customer_gclids`
+
+#### Scenario: Cleanup migration NULLs the stale GCLID
+- **WHEN** a `pending` row is identified with a stale GCLID
+- **THEN** its `gclid` is set to NULL and `status` stays `pending` so the upload phase retries it via enhanced conversions
 
 ### Requirement: Backfill function populates customer_gclids from historical data
 The system SHALL provide a SQL function `backfill_customer_gclids()` that scans all existing `booking_tags` (where `key = 'gclid'`) and `callrail_leads` (where `gclid IS NOT NULL`) and upserts the associated customer attribution into `customer_gclids`. The function SHALL be idempotent.

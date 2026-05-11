@@ -133,14 +133,14 @@ sequenceDiagram
 
     DB->>CFG: Check qualified_lead.enabled
     CFG-->>DB: enabled = true
-    DB->>DB: get_pending_qualified_lead_conversions()<br/>→ work_status complete + priced options<br/>GCLID from customer_gclids (first_seen_at ASC)
+    DB->>DB: get_pending_qualified_lead_conversions()<br/>→ work_status complete + priced options<br/>GCLID from customer_gclids (first_seen_at ASC,<br/>filtered: first_seen_at >= conversion_datetime - 90d)
     DB->>DB: INSERT INTO gads_conversion_uploads<br/>(estimate_id, 'qualified_lead', 'pending', gclid,<br/>value = AVG(options) / 100)<br/>ON CONFLICT DO NOTHING
 
     Note over DB: Stage 3 — Converted Lead detection
 
     DB->>CFG: Check converted_lead.enabled
     CFG-->>DB: enabled = true
-    DB->>DB: get_pending_converted_lead_conversions()<br/>→ approved estimate_options<br/>GCLID from customer_gclids (first_seen_at ASC)
+    DB->>DB: get_pending_converted_lead_conversions()<br/>→ approved estimate_options<br/>GCLID from customer_gclids (first_seen_at ASC,<br/>filtered: first_seen_at >= conversion_datetime - 90d)
     DB->>DB: INSERT INTO gads_conversion_uploads<br/>(estimate_id, 'converted_lead', 'pending', gclid,<br/>value = SUM(approved options) / 100)<br/>ON CONFLICT DO NOTHING
 ```
 
@@ -392,8 +392,32 @@ Before discovery runs, the pre-pass upserts `customer_gclids` rows from two sour
 1. `booking_tags` where `key = 'gclid'` → source = `'booking_form'`
 2. `callrail_leads` where `gclid IS NOT NULL` and `customer_id IS NOT NULL` → source = `'callrail'`
 
-**First-touch resolution:**  
-When the pipeline needs a GCLID for Qualified/Converted stages, it queries `customer_gclids` and picks the row with the earliest `first_seen_at`. This ensures a customer attributed via Google Ads on their first booking continues to get credit on subsequent estimates even if later estimates have no GCLID.
+**First-touch resolution (with click lookback window):**  
+When the pipeline needs a GCLID for Qualified/Converted stages, it queries `customer_gclids`, filters to rows within the click lookback window (`first_seen_at >= conversion_datetime - INTERVAL '90 days'`), and picks the earliest eligible `first_seen_at` (first-touch within window). If no GCLID is within the window, the value is NULL and the upload phase falls back to enhanced conversions.
+
+**Google Ads — two independent time constraints:**
+
+```
+                    click_through_lookback_window_days
+                    (per-ConversionAction setting, default 30d, max 90d)
+                    ◄──────────────────────────────────►
+                                                        │
+       Click ──────────────────────────────────► Conversion ────────────────────► Upload
+       (GCLID born)                             (conversion_datetime)            (now)
+       first_seen_at                                       ◄────────────────────►
+                                                           Upload recency window
+                                                           90 days (hard API limit)
+```
+
+| Constraint | Window | Reference point | Enforced by |
+|---|---|---|---|
+| Window 1 — Upload recency | `conversion_datetime >= now() - 90d` | Upload time | Upload edge function (`status = 'expired'`) |
+| Window 2 — Click lookback | `first_seen_at >= conversion_datetime - 90d` | Conversion event | Discovery SQL functions (GCLID subquery filter) |
+
+These are distinct. Window 1 catches stale *conversions*. Window 2 catches stale *clicks*. A row can pass Window 1 and fail Window 2 (recent conversion with an old click), which was the source of perpetual-pending failures before this constraint was added.
+
+**Architecture spec maintenance requirement:**  
+After any implementation that changes the behavior of a pipeline stage, this spec SHALL be updated to reflect the new behavior before the change is archived.
 
 ---
 

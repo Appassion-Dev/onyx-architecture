@@ -18,7 +18,6 @@ Covers: booking widget attribution → booking form → hcp-booking edge functio
 
 | Change | Status |
 |--------|--------|
-| [tighten-gclid-attribution-window](changes/tighten-gclid-attribution-window/) | In progress |
 
 ---
 

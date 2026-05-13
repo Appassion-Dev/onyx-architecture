@@ -135,10 +135,15 @@ def categorize(files: list[str]) -> dict[str, list[str]]:
 # ── AI summary generation ─────────────────────────────────────────────────────
 
 SYSTEM_PROMPT = """\
-You are a technical writer summarizing changes to a software specification \
-repository for non-technical stakeholders. Be concise (2-4 sentences max \
-per summary). Focus on WHAT is changing and WHY it matters to the product, \
-not implementation details. Write in Russian."""
+You are a technical writer generating stakeholder updates for a software \
+specification repository. Follow these rules:
+- Lead with the conclusion, not the journey.
+- Frame everything in terms of OUTCOMES and GOALS, not activities or file changes.
+- Use the executive update format: TL;DR first, then supporting bullets.
+- Keep the total output under 150 words.
+- Use bold (*word*) for key terms. Use bullet points for lists.
+- If there is a risk or blocker, lead with it — do not bury it after good news.
+- Write in Russian."""
 
 
 def summarize_proposals(files: list[str]) -> str:
@@ -151,10 +156,13 @@ def summarize_proposals(files: list[str]) -> str:
         {
             "role": "user",
             "content": (
-                "The following specification proposal files were updated in a commit. "
-                "These represent a potential development direction — the idea has been "
-                "proposed but not yet finalized. Summarize what is being proposed and "
-                "why it matters. Do not describe the file format, just the content.\n\n"
+                "A development proposal was updated. It is not finalized — it represents "
+                "a direction being considered. Generate a stakeholder update using this format:\n"
+                "*TL;DR:* [one sentence — the most important thing to know about this proposal]\n"
+                "• [What outcome or goal this proposal serves]\n"
+                "• [Key decision or tradeoff involved, if any]\n"
+                "• [What happens next / what still needs to be decided]\n\n"
+                "Do not describe the file. Focus on the product impact.\n\n"
                 f"{contents}"
             ),
         },
@@ -172,10 +180,13 @@ def summarize_specs(files: list[str]) -> str:
         {
             "role": "user",
             "content": (
-                "The following finalized specification files were updated in a commit. "
-                "These represent confirmed, production-ready requirements. Summarize "
-                "what capability was added or changed and what it means for the product. "
-                "Do not describe the file format, just the content.\n\n"
+                "A finalized specification was updated. This represents confirmed, "
+                "production-ready requirements. Generate a stakeholder update using this format:\n"
+                "*TL;DR:* [one sentence — what changed and the outcome it enables]\n"
+                "• [What capability was added or changed, framed as a product outcome]\n"
+                "• [Who or what this affects]\n"
+                "• [Any decisions locked in or constraints established]\n\n"
+                "Do not describe the file. Focus on the product impact.\n\n"
                 f"{contents}"
             ),
         },
@@ -195,10 +206,13 @@ def summarize_archive(files: list[str]) -> str:
         {
             "role": "user",
             "content": (
-                "A change proposal has just been archived — meaning it has been fully "
-                "implemented and its requirements are now part of the finalized specs. "
-                "Summarize what was built and delivered. "
-                "Do not describe the file format, just the content.\n\n"
+                "A development change was just shipped and archived — it is fully implemented. "
+                "Generate a stakeholder update using this format:\n"
+                "*TL;DR:* [one sentence — what was delivered and what outcome it achieves]\n"
+                "• [The specific capability or improvement now live]\n"
+                "• [Who benefits and how]\n"
+                "• [Any metrics, guardrails, or follow-on work to watch]\n\n"
+                "Do not describe the file. Focus on the delivered outcome.\n\n"
                 f"{contents}"
             ),
         },

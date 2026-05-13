@@ -23,6 +23,6 @@
 ## 5. Validation
 
 - [x] 5.1 Run `openspec validate --change "tighten-gclid-attribution-window"` (or equivalent) to confirm all artifacts are present
-- [ ] 5.2 Manually test qualified_lead discovery: create a test estimate with a `customer_gclids` row outside the 90-day window → confirm `gclid = NULL` is discovered
-- [ ] 5.3 Manually test qualified_lead discovery: create a test estimate with a `customer_gclids` row within the 90-day window → confirm correct GCLID is discovered
-- [ ] 5.4 Confirm cleanup migration correctly NULLs GCLIDs on the affected rows (run diagnostic query before and after)
+- [x] 5.2 Manually test qualified_lead discovery: create a test estimate with a `customer_gclids` row outside the 90-day window → confirm `gclid = NULL` is discovered
+- [x] 5.3 Manually test qualified_lead discovery: create a test estimate with a `customer_gclids` row within the 90-day window → confirm correct GCLID is discovered
+- [x] 5.4 Confirm cleanup migration correctly NULLs GCLIDs on the affected rows (run diagnostic query before and after)

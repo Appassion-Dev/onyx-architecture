@@ -3,6 +3,9 @@ name: OpenSpec Change Notification
 on:
   push:
     branches: [main]
+    paths:
+      - 'changes/**'
+      - 'specs/**'
   workflow_dispatch:
     inputs:
       files:

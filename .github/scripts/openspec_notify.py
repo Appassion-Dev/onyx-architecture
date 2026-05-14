@@ -27,7 +27,7 @@ from pathlib import Path
 # ── Configuration ────────────────────────────────────────────────────────────
 
 MODELS_API = "https://models.inference.ai.azure.com/chat/completions"
-MODEL = "gpt-4o-mini"
+MODEL = "gpt-4o"
 MAX_FILE_CHARS = 4000   # truncate large files before sending to the model
 MAX_FILES_PER_CALL = 5  # cap to keep prompt size reasonable
 

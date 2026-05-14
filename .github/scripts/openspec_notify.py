@@ -147,9 +147,8 @@ specification repository. Follow these rules:
 
 
 def summarize_proposals(files: list[str]) -> str:
-    sample = files[:MAX_FILES_PER_CALL]
     contents = "\n\n---\n\n".join(
-        f"File: {f}\n\n{read_file_safe(f)}" for f in sample
+        f"File: {f}\n\n{Path(f).read_text(encoding='utf-8', errors='replace')}" for f in files
     )
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -171,9 +170,8 @@ def summarize_proposals(files: list[str]) -> str:
 
 
 def summarize_specs(files: list[str]) -> str:
-    sample = files[:MAX_FILES_PER_CALL]
     contents = "\n\n---\n\n".join(
-        f"File: {f}\n\n{read_file_safe(f)}" for f in sample
+        f"File: {f}\n\n{Path(f).read_text(encoding='utf-8', errors='replace')}" for f in files
     )
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -195,11 +193,8 @@ def summarize_specs(files: list[str]) -> str:
 
 
 def summarize_archive(files: list[str]) -> str:
-    # Try to find the proposal.md in the archived change to summarize it
-    proposal_files = [f for f in files if f.endswith("proposal.md")]
-    target = proposal_files[:1] or files[:1]
     contents = "\n\n---\n\n".join(
-        f"File: {f}\n\n{read_file_safe(f)}" for f in target
+        f"File: {f}\n\n{Path(f).read_text(encoding='utf-8', errors='replace')}" for f in files
     )
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -211,7 +206,10 @@ def summarize_archive(files: list[str]) -> str:
                 "*TL;DR:* [one sentence — what was delivered and what outcome it achieves]\n"
                 "• [The specific capability or improvement now live]\n"
                 "• [Who benefits and how]\n"
-                "• [Any metrics, guardrails, or follow-on work to watch]\n\n"
+                "• [Any metrics, guardrails, or follow-on work to watch]\n"
+                "• _Scope:_ [one line — number of tasks completed and files changed, grouped by domain "
+                "(e.g. frontend, backend, database, edge functions). Example: '6 tasks · 12 files — "
+                "frontend (4), edge functions (2), database (1), config (5)']\n\n"
                 "Do not describe the file. Focus on the delivered outcome.\n\n"
                 f"{contents}"
             ),

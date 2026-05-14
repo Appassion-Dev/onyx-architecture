@@ -3,11 +3,15 @@
 openspec_notify.py
 
 Reads the list of changed files from a git diff, categorizes them by
-openspec path pattern, generates an AI summary via GitHub Models API
-(using GITHUB_TOKEN — no extra secrets), and posts to Slack.
+openspec path pattern, generates an AI summary, and posts to Slack.
 
-Environment variables required:
-  GITHUB_TOKEN          - auto-provided by GitHub Actions
+AI backend (first key found wins):
+  AI_API_KEY    - preferred; any OpenAI-compatible provider
+  AI_API_URL    - endpoint for the above (default: https://openrouter.ai/api/v1/chat/completions)
+  AI_MODEL      - model name to use (default: openai/gpt-4o)
+  GITHUB_TOKEN  - fallback; uses GitHub Models API (auto-provided)
+
+Other environment variables required:
   SLACK_WEBHOOK_URL     - Slack Incoming Webhook URL (repo secret)
   GH_REPO               - e.g. "myorg/openspec"
   GH_SHA                - full commit SHA
@@ -26,8 +30,12 @@ from pathlib import Path
 
 # ── Configuration ────────────────────────────────────────────────────────────
 
-MODELS_API = "https://models.inference.ai.azure.com/chat/completions"
-MODEL = "gpt-4o"
+GITHUB_MODELS_API = "https://models.inference.ai.azure.com/chat/completions"
+GITHUB_MODEL = "gpt-4o"
+
+DEFAULT_AI_API_URL = "https://openrouter.ai/api/v1/chat/completions"
+DEFAULT_AI_MODEL = "openai/gpt-4o"
+
 MAX_FILE_CHARS = 4000   # truncate large files before sending to the model
 MAX_FILES_PER_CALL = 5  # cap to keep prompt size reasonable
 
@@ -53,17 +61,56 @@ def read_file_safe(path: str) -> str:
         return "[file unreadable]"
 
 
-def call_github_models(messages: list[dict]) -> str:
-    token = read_env("GITHUB_TOKEN")
+def call_ai(messages: list[dict]) -> str:
+    ai_key = read_env("AI_API_KEY")
+    if ai_key:
+        url = read_env("AI_API_URL") or DEFAULT_AI_API_URL
+        model = read_env("AI_MODEL") or DEFAULT_AI_MODEL
+        return _call_openai_compatible(messages, ai_key, url, model)
+    return _call_github_models(messages)
+
+
+def _call_openai_compatible(messages: list[dict], api_key: str, url: str, model: str) -> str:
     payload = json.dumps({
-        "model": MODEL,
+        "model": model,
         "messages": messages,
         "temperature": 0.3,
         "max_tokens": 400,
     }).encode()
 
     req = urllib.request.Request(
-        MODELS_API,
+        url,
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read())
+            return data["choices"][0]["message"]["content"].strip()
+    except urllib.error.HTTPError as e:
+        body = e.read().decode(errors="replace")
+        print(f"[AI] HTTP {e.code}: {body}", file=sys.stderr)
+        return None
+    except Exception as e:
+        print(f"[AI] Error: {e}", file=sys.stderr)
+        return None
+
+
+def _call_github_models(messages: list[dict]) -> str:
+    token = read_env("GITHUB_TOKEN")
+    payload = json.dumps({
+        "model": GITHUB_MODEL,
+        "messages": messages,
+        "temperature": 0.3,
+        "max_tokens": 400,
+    }).encode()
+
+    req = urllib.request.Request(
+        GITHUB_MODELS_API,
         data=payload,
         headers={
             "Authorization": f"Bearer {token}",
@@ -161,12 +208,13 @@ def summarize_proposals(files: list[str]) -> str:
                 "• [What outcome or goal this proposal serves]\n"
                 "• [Key decision or tradeoff involved, if any]\n"
                 "• [What happens next / what still needs to be decided]\n\n"
-                "Do not describe the file. Focus on the product impact.\n\n"
+                "Do not describe the file. Focus on the product impact. "
+                "Write your entire response in Russian.\n\n"
                 f"{contents}"
             ),
         },
     ]
-    return call_github_models(messages)
+    return call_ai(messages)
 
 
 def summarize_specs(files: list[str]) -> str:
@@ -184,12 +232,13 @@ def summarize_specs(files: list[str]) -> str:
                 "• [What capability was added or changed, framed as a product outcome]\n"
                 "• [Who or what this affects]\n"
                 "• [Any decisions locked in or constraints established]\n\n"
-                "Do not describe the file. Focus on the product impact.\n\n"
+                "Do not describe the file. Focus on the product impact. "
+                "Write your entire response in Russian.\n\n"
                 f"{contents}"
             ),
         },
     ]
-    return call_github_models(messages)
+    return call_ai(messages)
 
 
 def summarize_archive(files: list[str]) -> str:
@@ -210,12 +259,13 @@ def summarize_archive(files: list[str]) -> str:
                 "• _Scope:_ [one line — number of tasks completed and files changed, grouped by domain "
                 "(e.g. frontend, backend, database, edge functions). Example: '6 tasks · 12 files — "
                 "frontend (4), edge functions (2), database (1), config (5)']\n\n"
-                "Do not describe the file. Focus on the delivered outcome.\n\n"
+                "Do not describe the file. Focus on the delivered outcome. "
+                "Write your entire response in Russian.\n\n"
                 f"{contents}"
             ),
         },
     ]
-    return call_github_models(messages)
+    return call_ai(messages)
 
 
 # ── Slack block builders ──────────────────────────────────────────────────────

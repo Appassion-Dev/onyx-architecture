@@ -37,6 +37,9 @@ jobs:
       - name: Send OpenSpec notification
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AI_API_KEY: ${{ secrets.AI_API_KEY }}
+          AI_API_URL: ${{ secrets.AI_API_URL }}
+          AI_MODEL: ${{ secrets.AI_MODEL }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_OPENSPEC_WEBHOOK }}
           GH_REPO: ${{ github.repository }}
           GH_SHA: ${{ github.sha }}

@@ -359,6 +359,7 @@ def main(changed_files_path: str) -> None:
         return
 
     all_files = [f.strip() for f in raw.splitlines() if f.strip()]
+    all_files = [f for f in all_files if Path(f).name != ".openspec.yaml"]
     cats = categorize(all_files)
 
     sections: list[dict] = []

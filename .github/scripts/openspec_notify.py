@@ -23,6 +23,7 @@ Other environment variables required:
 
 import json
 import os
+import re
 import sys
 import urllib.request
 import urllib.error
@@ -38,6 +39,17 @@ DEFAULT_AI_MODEL = "openai/gpt-4o"
 
 MAX_FILE_CHARS = 4000   # truncate large files before sending to the model
 MAX_FILES_PER_CALL = 5  # cap to keep prompt size reasonable
+
+
+def md_to_mrkdwn(text: str) -> str:
+    """Convert markdown formatting to Slack mrkdwn."""
+    # Bold: **text** → *text*
+    text = re.sub(r'\*\*(.*?)\*\*', r'*\1*', text)
+    # Markdown list items: lines starting with "* " or "- " → bullet
+    text = re.sub(r'^[\*\-]\s+', '• ', text, flags=re.MULTILINE)
+    # Ensure TL;DR: is bolded if not already
+    text = re.sub(r'^(?!\*)TL;DR:', '*TL;DR:*', text, flags=re.MULTILINE)
+    return text
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -214,7 +226,8 @@ def summarize_proposals(files: list[str]) -> str:
             ),
         },
     ]
-    return call_ai(messages)
+    result = call_ai(messages)
+    return md_to_mrkdwn(result) if result else None
 
 
 def summarize_specs(files: list[str]) -> str:
@@ -238,7 +251,8 @@ def summarize_specs(files: list[str]) -> str:
             ),
         },
     ]
-    return call_ai(messages)
+    result = call_ai(messages)
+    return md_to_mrkdwn(result) if result else None
 
 
 def summarize_archive(files: list[str]) -> str:
@@ -265,7 +279,8 @@ def summarize_archive(files: list[str]) -> str:
             ),
         },
     ]
-    return call_ai(messages)
+    result = call_ai(messages)
+    return md_to_mrkdwn(result) if result else None
 
 
 # ── Slack block builders ──────────────────────────────────────────────────────

@@ -166,25 +166,31 @@ def post_to_slack(blocks: list[dict]) -> None:
 
 # ── Category detection ────────────────────────────────────────────────────────
 
+PROPOSAL_DOC_NAMES = {"proposal.md", "design.md", "tasks.md"}
+
+
 def categorize(files: list[str]) -> dict[str, list[str]]:
     """
-    Returns a dict with keys: 'proposals', 'specs', 'archive', 'other'.
-    'proposals' = changes under changes/ but NOT in changes/archive/
-    'archive'   = changes/archive/** (a change was finalized)
-    'specs'     = specs/**
+    Returns a dict with keys: 'proposals', 'specs', 'other'.
+    'proposals' = changes/<change>/(proposal|design|tasks).md only.
+                  Excludes changes/<change>/specs/** and changes/archive/**.
+    'specs'     = specs/** (acknowledged only, content not sent to AI).
     """
     result: dict[str, list[str]] = {
         "proposals": [],
         "specs": [],
-        "archive": [],
         "other": [],
     }
     for f in files:
         if f.startswith("changes/archive/"):
-            result["archive"].append(f)
-        elif f.startswith("changes/"):
-            result["proposals"].append(f)
-        elif f.startswith("specs/"):
+            continue
+        if f.startswith("changes/"):
+            parts = f.split("/")
+            # changes/<change>/<file> — exactly 3 segments, and not under .../specs/
+            if len(parts) == 3 and parts[2] in PROPOSAL_DOC_NAMES:
+                result["proposals"].append(f)
+            continue
+        if f.startswith("specs/"):
             result["specs"].append(f)
         else:
             result["other"].append(f)
@@ -194,15 +200,15 @@ def categorize(files: list[str]) -> dict[str, list[str]]:
 # ── AI summary generation ─────────────────────────────────────────────────────
 
 SYSTEM_PROMPT = """\
-You are a technical writer generating stakeholder updates for a software \
-specification repository. Follow these rules:
-- Lead with the conclusion, not the journey.
-- Frame everything in terms of OUTCOMES and GOALS, not activities or file changes.
-- Use the executive update format: TL;DR first, then supporting bullets.
-- Keep the total output under 150 words.
+You write stakeholder updates in CAVEMAN STYLE for non-technical readers. Rules:
+- Short sentences. Simple words. No jargon, no acronyms, no tech terms.
+- If a technical concept is unavoidable, translate it into an everyday analogy.
+- Lead with the conclusion. Talk about OUTCOMES (what changes for people), never files or code.
+- Format: TL;DR first, then 2–4 short bullets.
+- Total output under 120 words.
 - Use bold (*word*) for key terms. Use bullet points for lists.
-- If there is a risk or blocker, lead with it — do not bury it after good news.
-- Write in Russian."""
+- If there is a risk or blocker, say it first.
+- Write in Russian, in caveman style (короткие фразы, простые слова, как для ребёнка)."""
 
 
 def summarize_proposals(files: list[str]) -> str:
@@ -221,59 +227,6 @@ def summarize_proposals(files: list[str]) -> str:
                 "• [Key decision or tradeoff involved, if any]\n"
                 "• [What happens next / what still needs to be decided]\n\n"
                 "Do not describe the file. Focus on the product impact. "
-                "Write your entire response in Russian.\n\n"
-                f"{contents}"
-            ),
-        },
-    ]
-    result = call_ai(messages)
-    return md_to_mrkdwn(result) if result else None
-
-
-def summarize_specs(files: list[str]) -> str:
-    contents = "\n\n---\n\n".join(
-        f"File: {f}\n\n{Path(f).read_text(encoding='utf-8', errors='replace')}" for f in files
-    )
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {
-            "role": "user",
-            "content": (
-                "A finalized specification was updated. This represents confirmed, "
-                "production-ready requirements. Generate a stakeholder update using this format:\n"
-                "*TL;DR:* [one sentence — what changed and the outcome it enables]\n"
-                "• [What capability was added or changed, framed as a product outcome]\n"
-                "• [Who or what this affects]\n"
-                "• [Any decisions locked in or constraints established]\n\n"
-                "Do not describe the file. Focus on the product impact. "
-                "Write your entire response in Russian.\n\n"
-                f"{contents}"
-            ),
-        },
-    ]
-    result = call_ai(messages)
-    return md_to_mrkdwn(result) if result else None
-
-
-def summarize_archive(files: list[str]) -> str:
-    contents = "\n\n---\n\n".join(
-        f"File: {f}\n\n{Path(f).read_text(encoding='utf-8', errors='replace')}" for f in files
-    )
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {
-            "role": "user",
-            "content": (
-                "A development change was just shipped and archived — it is fully implemented. "
-                "Generate a stakeholder update using this format:\n"
-                "*TL;DR:* [one sentence — what was delivered and what outcome it achieves]\n"
-                "• [The specific capability or improvement now live]\n"
-                "• [Who benefits and how]\n"
-                "• [Any metrics, guardrails, or follow-on work to watch]\n"
-                "• _Scope:_ [one line — number of tasks completed and files changed, grouped by domain "
-                "(e.g. frontend, backend, database, edge functions). Example: '6 tasks · 12 files — "
-                "frontend (4), edge functions (2), database (1), config (5)']\n\n"
-                "Do not describe the file. Focus on the delivered outcome. "
                 "Write your entire response in Russian.\n\n"
                 f"{contents}"
             ),
@@ -364,21 +317,11 @@ def main(changed_files_path: str) -> None:
 
     sections: list[dict] = []
 
-    if cats["archive"]:
-        summary = summarize_archive(cats["archive"])
-        sections.append({
-            "emoji": "✅",
-            "title": "Change Finalized",
-            "summary": summary or "_Summary unavailable — see linked files._",
-            "files": cats["archive"],
-        })
-
     if cats["specs"]:
-        summary = summarize_specs(cats["specs"])
         sections.append({
             "emoji": "📐",
-            "title": "Spec Updated",
-            "summary": summary or "_Summary unavailable — see linked files._",
+            "title": "Spec Integrated",
+            "summary": "Новое правило теперь в силе. Команда договорилась — так и делаем.",
             "files": cats["specs"],
         })
 

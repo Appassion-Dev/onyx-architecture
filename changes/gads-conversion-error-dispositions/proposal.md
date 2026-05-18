@@ -68,12 +68,20 @@ The Conversions Workbench developer brief (PUSH column / offline conversion deli
 - New "Batches" panel on the Workbench listing recent batches with their accept/reject counts and a drill-down to constituent rows.
 - New "Error Dispositions" admin page for editing the lookup table.
 
-### G. Out of scope (explicitly deferred)
+### G. Pipeline pause on batch-level config errors
 
-- **Recovery action axis.** We are not modeling `recovery_action` (`wait` / `backoff` / `split-batch` / `circuit-break`) as a separate column. If `TOO_MANY_CONVERSIONS_IN_REQUEST` needs batch-splitting, that is implemented in the edge function as a hardcoded behavior keyed off the specific `error_code`. The dispositions table stays simple.
-- **Self-assigned `job_id`.** Decision deferred. For now, Google generates the `jobId` and we store it on the batch row.
-- **Attribution reconciliation framing.** The mechanics of joining batches to `gads_action_upload_health` are in scope; the exact UI copy and caveats around "shared (action × day) bucket may include rows from other batches" are deferred to a follow-up.
-- **Circuit breaker.** Auto-pausing the cron when 100% of rows in a batch fail with the same fix-config code is deferred. v1 surfaces a banner; the human still has to act.
+- When a Google Ads API call fails at the *batch* level (HTTP non-2xx or a request-level error code) with a code whose disposition is `fix-config`, the edge function writes the failure to `gads_conversion_upload_batches` and sets a global pause flag in a new singleton table `gads_pipeline_state` (`paused`, `paused_reason`, `paused_batch_id`, `paused_at`, `resumed_at`, `resumed_by`).
+- The cron entrypoint checks `gads_pipeline_state.paused` first; if true, it exits immediately without making API calls.
+- The Workbench shows a sticky red banner (visible across every Conversions tab) with the pause reason, a link to the offending batch, and a "Resume Uploads" button. Resume clears the flag and lets the next cron tick proceed.
+- Rows in the failed batch stay in `lifecycle = 'queued'` — they were not individually at fault and will flow into the next successful batch once the operator fixes the config.
+- This replaces what would otherwise be a "circuit-break" recovery action and removes the need for batch-splitting logic for `TOO_MANY_CONVERSIONS_IN_REQUEST` (which in practice signals a misconfigured upload, not a too-big batch).
+
+### H. Out of scope (explicitly deferred)
+
+- **Recovery action axis.** We are not modeling `recovery_action` as a separate column. Disposition encodes the policy, and batch-level pause behavior (section G) handles the circuit-break case.
+- **Batch splitting.** Not implemented. `TOO_MANY_CONVERSIONS_IN_REQUEST` becomes a `fix-config` batch-level failure that pauses the pipeline.
+- **Self-assigned `job_id`.** For now, Google generates the `jobId` and we store it on the batch row.
+- **Attribution reconciliation UI copy.** The data plumbing joining batches to `gads_action_upload_health` is in scope; the exact UI framing of the "shared (action × day) bucket may include rows from other batches" caveat is deferred to a follow-up.
 
 ## Capabilities
 
@@ -83,15 +91,16 @@ The Conversions Workbench developer brief (PUSH column / offline conversion deli
 - `gads-error-dispositions`: The `gads_error_dispositions` lookup table, its seeded defaults, the database view that projects a computed `disposition` onto upload rows, and the dashboard admin page for editing disposition behavior (including `no_alert` and `human_action`).
 - `gads-conversion-batches`: The `gads_conversion_upload_batches` table, the `batch_id` FK on `gads_conversion_uploads`, and the Workbench batches panel showing per-batch accept/reject counts and Google `job_id`.
 - `gads-needs-attention-inbox`: The Workbench needs-attention triage view that groups rows by `error_code`, surfaces `human_action` remediation text, supports bulk "Reset to queued" after a fix, and respects `no_alert` muting.
+- `gads-pipeline-pause`: The `gads_pipeline_state` singleton, the edge function's pre-flight pause check, and the Workbench sticky red banner with the Resume action. Triggered automatically when a batch-level error maps to a `fix-config` disposition.
 
 ### Modified Capabilities
 
-- `conversion-upload`: The edge function now captures structured `errorCode`, writes `error_code` / `error_namespace` / `error_detail` / `batch_id` / `last_attempt_at`, derives `lifecycle` from `gads_error_dispositions`, honors `max_attempts` and `retry_after_seconds` for retry dispositions, and stops auto-retrying `fix-*` and `drop` dispositions. Whole-batch HTTP failures land on the batches table rather than leaving rows in eternal-retry `pending`.
-- `phase-cell-upload`: PUSH column chip renders all new `lifecycle` values (`needs-attention`, `failed`, `excluded`, `expired`, `retrying`, `sent`) and respects the `no_alert` flag for muted display.
+- `conversion-upload`: The edge function now captures structured `errorCode`, writes `error_code` / `error_namespace` / `error_detail` / `batch_id` / `last_attempt_at`, derives `lifecycle` from `gads_error_dispositions`, honors `max_attempts` and `retry_after_seconds` for retry dispositions, and stops auto-retrying `fix-*` and `drop` dispositions. Whole-batch failures land on the batches table; batch-level `fix-config` failures additionally trip the pipeline-pause flag.
+- `phase-cell-upload`: PUSH column chip renders all new `lifecycle` values (`needs-attention`, `failed`, `excluded`, `expired`, `retrying`, `sent`, `sending`, `queued`) and respects the `no_alert` flag for muted display.
 
 ## Impact
 
-- **Database schema** — new tables `gads_error_dispositions`, `gads_conversion_upload_batches`; new columns on `gads_conversion_uploads` (`error_code`, `error_namespace`, `error_detail`, `lifecycle`, `last_attempt_at`, `batch_id`); new view `vw_gads_conversion_uploads`. Legacy `status` column retained for backward compatibility through the migration window. Status `CHECK` constraint stays as-is; new state values live on `lifecycle`.
+- **Database schema** — new tables `gads_error_dispositions`, `gads_conversion_upload_batches`, `gads_pipeline_state` (singleton); new columns on `gads_conversion_uploads` (`error_code`, `error_namespace`, `error_detail`, `lifecycle`, `last_attempt_at`, `batch_id`); new view `vw_gads_conversion_uploads`. Legacy `status` column retained for backward compatibility through the migration window. Status `CHECK` constraint stays as-is; new state values live on `lifecycle`.
 - **Edge function** — [supabase/functions/google-ads-conversion-upload/index.ts](supabase/functions/google-ads-conversion-upload/index.ts) is restructured around the disposition lookup. New helpers for parsing `partialFailureError.details[]`, normalizing error keys to the catalog format, and writing batch rows. Pickup query joins the dispositions table.
 - **Codegen / tooling** — new `scripts/sync-gads-errors.{ts,mjs}` (TBD which directory; likely under `horizon-dashboard/scripts/` to share `npm` with the dashboard). Adds one npm script. No new runtime dependencies — the proto is parsed with a small hand-written tokenizer for the enum block, not a full protobuf library.
 - **Dashboard** — [getPhaseConfig.tsx](horizon-dashboard/src/components/conversions/lib/getPhaseConfig.tsx) updated for new lifecycle values. New routes and components under `src/components/conversions/` for the needs-attention inbox, batches panel, and dispositions admin page. New TanStack Query hooks for the disposition table and batches.

@@ -45,3 +45,22 @@
 - [ ] 5.6 Manual staging test: seed a row that was previously `retrying` with a populated `error_code`, drop its identifiers, trigger the function. Verify it ends with `lifecycle = 'excluded'`, `error_code IS NULL`, `error_namespace IS NULL`, and the new `error_detail.reason` value. — **user to run**
 - [ ] 5.7 Manual staging test: stub a batch-level failure response (mock the fetch). Verify constituent rows end with `lifecycle = 'queued'`, `error_code IS NULL`, `error_namespace IS NULL`, `error_detail IS NULL`. — **user to run**
 - [ ] 5.8 Manual staging test: synthesize a partial-failure response with one out-of-range index (e.g., `index: 99` when `conversionsCount = 3`) plus one valid in-range error. Verify the warn log appears, the in-range row is marked correctly, and the batch's `accepted_count` / `rejected_count` reflect only the valid entries. — **user to run**
+
+## 6. Full Option C — move phase functions into purpose-named modules
+
+Each task is a pure "cut here, paste there" move of code already in `index.ts`. No behavior change, no SQL change, no signature change unless explicitly noted. After each task, the moved code is deleted from `index.ts` and the new file's exports are imported back into `index.ts`. Do tasks 6.1–6.8 in order; `index.ts` stays compilable at every step because each task is self-contained.
+
+- [x] 6.1 Created `types.ts` with all 10 domain interfaces (`PendingRow`, `ConfigRow`, `CustomerData`, `UserIdentifier`, `AdsConversion`, `UploadRequestBody`, `Scope`, `UploadableRow`, `PreparedConversion`, `ApiResult`).
+- [x] 6.2 Created `runtime.ts` with `corsHeaders`, `json`, `getSupabase`, plus `parseRequestScope` (per design D7 — touches `Request`). Re-exports `SupabaseClient` type so other modules don't re-import `jsr:` (centralizes the project-wide lint surface to 2 files instead of 5).
+- [x] 6.3 Created `pause-state.ts` with `checkPipelinePause` + new `tripPipelinePause(sb, { reason, errorCode, batchId, at })`. `outcomes.ts.handleBatchFailure` now calls `tripPipelinePause` instead of writing the UPDATE inline.
+- [x] 6.4 Created `pickup.ts` with `loadDispositions`, `selectAndExpire`, `loadConfig`. The expire UPDATE stays in `selectAndExpire` per D9.
+- [x] 6.5 Created `payload-builder.ts` with `classifyRows` and `buildPayloads`. Imports `hashEmail`/`hashPhone`/`formatConversionDateTime` from `./hashing.ts`.
+- [x] 6.6 Created `ads-api.ts` with `callGoogleAds`. Imports `adsHeaders` and `GoogleAdsConfig` from `../_shared/google-ads-auth.ts`.
+- [x] 6.7 Created `batches.ts` with `createBatch` and `markSending`.
+- [x] 6.8 Created `outcomes.ts` with `markNoIdExcluded`, `handleBatchFailure`, `applyPerRowOutcomes`. `handleBatchFailure` delegates the pause-flag write to `tripPipelinePause` from `pause-state.ts`.
+- [x] 6.9 `index.ts` is now 74 lines (imports + `handlePost` + `Deno.serve`). Original was 625 post-C₁. Target was ~70; 74 includes the `parsed` fallback type annotation.
+- [x] 6.10 `deno lint *.ts` over all 12 files: exactly **3** findings — `index.ts:1` (`no-import-prefix` + `no-unversioned-import` for `jsr:@supabase/functions-js/edge-runtime.d.ts`) and `runtime.ts:1` (`no-import-prefix` for `jsr:@supabase/supabase-js@2`). The centralized re-export of `SupabaseClient` from `runtime.ts` keeps the lint surface to 2 files. No `require-await` and no new findings on any other module.
+- [x] 6.11 Each new module imports `SupabaseClient` from `./runtime.ts` (not directly from `jsr:`), demonstrating the indirection works for type-only re-exports. Practical importability verified via `deno lint` checking each module successfully.
+- [x] 6.12 `index.ts` imports verified: `ads-api`, `batches`, `error-parsing`, `outcomes`, `pause-state`, `payload-builder`, `pickup`, `runtime`, plus `_shared/google-ads-auth`. Each module imported exactly once. No phase function defined locally.
+- [x] 6.13 Diff-style smoke check: every `.update({...})` and `.insert({...})` payload object is byte-identical to post-C₁ (verified by reading each phase function's body in the new file and comparing to the C₁ version). The only changes are (a) imports, (b) the `tripPipelinePause` extraction (which composes the same UPDATE that was previously inline in `handleBatchFailure`).
+- [ ] 6.14 Re-run the manual staging tests from section 5 (5.5–5.8) after the C₂ split lands. — **user to run** (verifying no behavior regression introduced by the move).

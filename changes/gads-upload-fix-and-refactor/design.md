@@ -116,27 +116,109 @@ The caller at [index.ts:475](supabase/functions/google-ads-conversion-upload/ind
 
 **Why:** `require-await` is a real lint rule that catches a class of bugs (a function declared `async` for documentation but accidentally synchronous). The proper signal is "this returns a Promise" via the explicit return type, not the `async` keyword. Callers do not need to change.
 
-### D6. Refactor: split pure helpers into sibling modules; keep orchestration in `index.ts`
+### D6. Refactor: full Option C — every responsibility in its own module
 
-**Decision:** Three new files alongside `index.ts`:
+**Decision:** Push the module split all the way: `index.ts` becomes a thin orchestration over eight purpose-named sibling modules. The three pure-helper modules from the first pass (`error-parsing.ts`, `disposition.ts`, `hashing.ts`) stay. Five additional modules carry the phase functions out of `index.ts`:
 
-- `error-parsing.ts` exports `parsePartialFailure`, `extractErrorCode`, `KNOWN_ERROR_NAMESPACES`, `ParsedRowError`, `ParsedPartialFailure`.
-- `disposition.ts` exports `Lifecycle`, `LIFECYCLE_TO_STATUS`, `Disposition`, `DispositionRow`, `lifecycleFromDisposition`.
-- `hashing.ts` exports `sha256hex`, `hashEmail`, `hashPhone`, `formatConversionDateTime`.
+- `types.ts` — every domain interface (`PendingRow`, `ConfigRow`, `CustomerData`, `UserIdentifier`, `AdsConversion`, `UploadRequestBody`, `Scope`, `UploadableRow`, `PreparedConversion`, `ApiResult`). No logic.
+- `runtime.ts` — `corsHeaders`, `json`, `getSupabase`. The only module that touches `Deno.env`.
+- `pause-state.ts` — `checkPipelinePause` + `tripPipelinePause` (the pause-flag write currently inlined in the batch-failure path).
+- `pickup.ts` — `loadDispositions`, `selectAndExpire`, `loadConfig`. Read-side phase.
+- `payload-builder.ts` — `classifyRows`, `buildPayloads`. Pure-ish payload construction.
+- `ads-api.ts` — `callGoogleAds`. The only `fetch()` to Google.
+- `batches.ts` — `createBatch`, `markSending`. Batch-row insert + the initial `sending` marker.
+- `outcomes.ts` — `markNoIdExcluded`, `handleBatchFailure`, `applyPerRowOutcomes`. Every terminal-row UPDATE plus the batch-row finalize.
 
-`index.ts` keeps:
-- `corsHeaders`, `json`, `getSupabase` (HTTP / env / Supabase glue — only useful here)
-- All domain interfaces local to the handler (`PendingRow`, `ConfigRow`, `CustomerData`, `UserIdentifier`, `AdsConversion`, `UploadRequestBody`)
-- The 13 phase functions (D7) + `handlePost` + `Deno.serve` glue
+`index.ts` keeps only:
+- The ~70-line `handlePost` orchestration that calls into the modules in order with three branch points (pause / empty pickup / batch-vs-row).
+- The `Deno.serve` entry + method/exception glue.
 
-**Why:**
-- The three extracted modules are pure (no Deno globals, no Supabase client). They can be imported into a future test file with no mocking.
-- Keeping the orchestration in `index.ts` preserves "open one file, read the pipeline" — the chief readability win the refactor is trying to deliver.
-- Supabase edge function bundling resolves relative imports at deploy time; no new tooling required.
+**Why this and not the previous "keep phases in `index.ts`" approach:**
+
+- *Testability is the explicit goal.* Phase functions co-located in `index.ts` were importable in principle, but a test file that imports `selectAndExpire` from `index.ts` also imports the `Deno.serve` side-effect at the bottom of that file. Splitting forces every test boundary to be intentional.
+- *Extension points become locations, not diffs.* Future work deferred from the parent change (batch splitting, self-assigned job IDs, attribution reconciliation join) maps directly onto `batches.ts` / `ads-api.ts` / a new module. Without the split, every such extension is a 30-line patch to `index.ts` that competes with the orchestration for space.
+- *Operational debugging is grep-driven.* "Where does the pause state get written?" → exactly one file. "Where do we write `error_code` to a row?" → exactly one file (`outcomes.ts`). "What does `callGoogleAds` actually do?" → exactly one file. The single-file layout forced developers to scroll to find each.
+- *"Read the pipeline in one place" is preserved* by the slim `handlePost` orchestration — that function still reads top-to-bottom and names every phase. The split moves *implementation* out, not *narrative*.
 
 **Alternatives considered:**
-- *One big `helpers.ts`.* Rejected: bundles unrelated concerns (parsing, mapping, hashing) into one import surface and obscures what's pure vs. what isn't.
-- *Move the phase functions into separate files too.* Rejected: the phases are not pure (they take `sb` and mutate DB) and their value is being readable together. Splitting them spreads the pipeline across 13 files.
+
+- *Stop at the C₁ three-module split.* Rejected: `index.ts` stays 625 lines, the phase functions remain effectively un-testable in isolation, and every future extension fights for vertical space.
+- *Group by lifecycle stage (`read/`, `write/`, `api/` subdirectories).* Rejected: directories add hierarchy without test boundaries that the flat layout doesn't already provide. Deno bundling cares about file count, not depth.
+- *One module per phase function (13 files instead of 8).* Rejected: too granular. `loadDispositions` and `loadConfig` are both 5-line reads — they belong with `selectAndExpire` in `pickup.ts`. `createBatch` and `markSending` are both batch-table writes — they belong together in `batches.ts`. The 8-module split matches conceptual boundaries, not phase boundaries.
+
+### D7. Refactor: handler orchestration in `index.ts`
+
+**Decision:** `handlePost` is decomposed into the phases listed below. Each phase is now imported from a sibling module (per D6) rather than defined locally. Phases that early-return drive control flow back to `handlePost` via either a `Response` (signaling "we're done") or a discriminated result.
+
+| Phase function | Inputs | Output | Module |
+|---|---|---|---|
+| `checkPipelinePause(sb)` | sb | `Response \| null` | `pause-state.ts` |
+| `parseRequestScope(req)` | req | `{ estimateIds?, conversionTypes? }` | `runtime.ts` |
+| `loadDispositions(sb)` | sb | `Map<string, DispositionRow>` | `pickup.ts` |
+| `selectAndExpire(sb, scope, dispositionMap)` | sb, scope, map | `PendingRow[]` | `pickup.ts` |
+| `loadConfig(sb)` | sb | `Map<string, ConfigRow>` | `pickup.ts` |
+| `classifyRows(pending, configMap, cfg)` | pending, cfg | `{ uploadable, skippedRows }` | `payload-builder.ts` |
+| `buildPayloads(uploadable)` | uploadable | `{ toUpload, noIdRows }` | `payload-builder.ts` |
+| `markNoIdExcluded(sb, noIdRows)` | sb, noIdRows | `void` | `outcomes.ts` |
+| `createBatch(sb, toUpload)` | sb, toUpload | `string` (batchId) | `batches.ts` |
+| `markSending(sb, ids, batchId)` | sb, ids, batchId | `void` | `batches.ts` |
+| `callGoogleAds(toUpload, cfg, accessToken)` | toUpload, cfg, token | `{ res, data, networkError }` | `ads-api.ts` |
+| `handleBatchFailure(sb, batchId, ...)` | sb, batchId, ... | `Response` | `outcomes.ts` |
+| `applyPerRowOutcomes(sb, batchId, toUpload, perRowErrors, dispositionMap, httpStatus, jobId)` | ... | `Response` | `outcomes.ts` |
+
+`handlePost` reads top-to-bottom in ~70 lines:
+
+```ts
+async function handlePost(req: Request): Promise<Response> {
+  const sb = getSupabase();
+  const cfg = getAdsConfig();
+
+  const pauseResp = await checkPipelinePause(sb);
+  if (pauseResp) return pauseResp;
+
+  const scope = await parseRequestScope(req);
+  const dispositionMap = await loadDispositions(sb);
+
+  const pending = await selectAndExpire(sb, scope, dispositionMap);
+  if (pending.length === 0)
+    return json({ uploaded: 0, skipped: 0, errored: 0, message: "No eligible conversions" });
+
+  const configMap = await loadConfig(sb);
+  const { uploadable, skippedRows } = classifyRows(pending, configMap, cfg);
+  if (uploadable.length === 0)
+    return json({ uploaded: 0, skipped: skippedRows.length, errored: 0 });
+
+  const accessToken = await getAccessToken(cfg);
+  const { toUpload, noIdRows } = await buildPayloads(uploadable);
+  if (noIdRows.length > 0) await markNoIdExcluded(sb, noIdRows);
+  const skippedTotal = skippedRows.length + noIdRows.length;
+  if (toUpload.length === 0)
+    return json({ uploaded: 0, skipped: skippedTotal, errored: 0 });
+
+  const batchId = await createBatch(sb, toUpload);
+  await markSending(sb, toUpload.map(x => x.row.id), batchId);
+
+  const { res, data, networkError } = await callGoogleAds(toUpload, cfg, accessToken);
+  const parsed = data ? parsePartialFailure(data, toUpload.length) : { perRow: new Map(), batchLevel: null };
+  const batchLevelError = parsed.batchLevel && parsed.perRow.size === 0 ? parsed.batchLevel : null;
+  const isBatchFailure = !res.ok || networkError !== null || batchLevelError !== null;
+
+  if (isBatchFailure)
+    return handleBatchFailure(sb, batchId, toUpload, batchLevelError, dispositionMap,
+                              res.status, networkError, skippedTotal);
+  return applyPerRowOutcomes(sb, batchId, toUpload, parsed.perRow, dispositionMap,
+                             res.status, (data?.jobId ?? null) as string | null, skippedTotal);
+}
+```
+
+**Why:**
+- Linear, no nested helper functions, no shared mutable state between phases beyond what passes through parameters.
+- Imports name where each phase lives; reading the imports tells you the module map.
+- The three branch points (pause, empty pickup, batch failure) are visible at the top level of `handlePost`.
+
+**Alternatives considered:**
+- *A `Stage[]` pipeline abstraction.* Rejected per the proposal — adds machinery for no concrete reorderability requirement.
+- *A class with method-per-phase.* Rejected — Deno edge functions instantiate per request; a class adds ceremony without testability gain over plain functions.
 
 ### D7. Refactor: extract 13 phase functions inside `index.ts`
 
@@ -213,6 +295,36 @@ async function handlePost(req: Request): Promise<Response> {
 - *A `Stage[]` pipeline abstraction.* Rejected per the proposal — adds machinery for no concrete reorderability requirement.
 - *A class with method-per-phase.* Rejected — Deno edge functions instantiate per request; a class adds ceremony without testability gain over plain functions.
 
+### D9. Module boundary rules: what goes where and why
+
+**Decision:** The 11-file layout (1 entry + 3 pure-helper + 7 new sibling modules) is governed by these explicit rules. A function lives in the module that matches the rule its body satisfies.
+
+| Module | Rule for what belongs here |
+|---|---|
+| `index.ts` | The single `handlePost` orchestration + `Deno.serve` + the method/exception wrapper. Nothing else. |
+| `types.ts` | Pure interfaces with no executable code. No `import`s of Supabase, Deno, or other runtime modules. |
+| `runtime.ts` | Touches `Deno.env`, `Request`/`Response`, or constructs a Supabase client. No domain logic. |
+| `hashing.ts` | Pure functions over strings; no I/O, no DB. |
+| `disposition.ts` | Pure types + pure lifecycle/disposition mapping; no I/O. |
+| `error-parsing.ts` | Pure parsing of the Google Ads API response shape. No DB, no `fetch`. |
+| `pause-state.ts` | Every read/write of `gads_pipeline_state`. Nothing else. |
+| `pickup.ts` | Read-only queries against `gads_conversion_uploads`, `gads_error_dispositions`, `gads_conversion_config` + the 90-day-expire UPDATE (which is conceptually a "select side-effect" because it determines what's eligible for the rest of the run). |
+| `payload-builder.ts` | Functions that take in-memory inputs and return in-memory outputs (with one allowed exception: `buildPayloads` is async because it `await`s `hashEmail`/`hashPhone` — but it does no DB). |
+| `ads-api.ts` | The only module that `fetch()`es to Google. Everything related to constructing the request and unwrapping the response shape lives here. |
+| `batches.ts` | INSERT into `gads_conversion_upload_batches` + the initial `sending` marker on the constituent rows. No terminal-state writes. |
+| `outcomes.ts` | Every terminal-state write on `gads_conversion_uploads` (`sent`, `failed`, `needs-attention`, `excluded`, the back-to-`queued` on batch failure) + the batch-row finalize UPDATE + the pause-trip *invocation* (via `tripPipelinePause` from `pause-state.ts`). |
+
+**Why these specific rules:**
+
+- *One owner per table column class.* `gads_pipeline_state` is owned by `pause-state.ts`; `gads_conversion_upload_batches` writes split by lifecycle (initial-insert in `batches.ts`, finalize-and-failure-update in `outcomes.ts`); `gads_conversion_uploads` reads in `pickup.ts`, transient `sending` write in `batches.ts`, terminal writes in `outcomes.ts`.
+- *The "select side-effect" exception for `selectAndExpire` is deliberate.* The expire UPDATE could live in `outcomes.ts`, but its outputs (which rows survive into `pending`) are pickup-side concerns. Splitting the UPDATE from its caller would require a second round-trip to figure out what got expired. The rule "pickup decides what's in the run, including aging rows out" stays cleaner.
+- *Pause-trip lives in `outcomes.ts` but delegates to `pause-state.ts`.* The decision to pause is made when a batch-level error matches a `fix-config` disposition — that decision belongs with the rest of the batch-failure response. But the actual UPDATE is in `pause-state.ts` so that table has exactly one writer.
+- *No `_shared/` extraction in this change.* `corsHeaders` and `json` could plausibly move to `supabase/functions/_shared/http.ts` since multiple edge functions need them. Deferred to keep this change scoped; do it as a follow-up if more functions adopt the pattern.
+
+**Alternatives considered:**
+- *Allow any module to touch any table.* Rejected: the rule "search for the table name to find every writer" is too valuable to give up. The split is structured around that property.
+- *Split `outcomes.ts` further (e.g., `success.ts`, `failure.ts`).* Rejected: the success and failure paths share enough plumbing (the `nowIso`, the `attempt_count` increment, the `batch_id`) that splitting them duplicates code without a corresponding test boundary win. `outcomes.ts` ≈ 200 lines is the largest new module but stays under "readable in one sitting".
+
 ### D8. `buildPayloads` returns `noIdRows` as data, the side effect happens separately
 
 **Decision:** `buildPayloads` is pure-ish: it takes `uploadable` and returns `{ toUpload, noIdRows }` without writing to the DB. The actual UPDATE for `noIdRows` is in `markNoIdExcluded`, called from `handlePost`.
@@ -230,20 +342,39 @@ async function handlePost(req: Request): Promise<Response> {
 
 - **Defensive `console.warn` on out-of-range index does not page anyone.** [Risk] If Google starts emitting out-of-range indices systematically, the warn flows into logs without alerting. → **Mitigation:** acceptable for v1. The batch row's `rejected_count` will diverge from the `perRowErrors.size` consumed, which is itself observable in the Batches panel. If this happens in practice, the follow-up is a structured-log emission with a known label that the log pipeline can alert on.
 
-- **Module split adds three import statements per consumer.** [Risk] Minor. → **Mitigation:** trivial; readability wins outweigh import surface.
+- **Module split adds eleven files where there was one.** [Risk] Deno edge function bundling resolves every relative import at deploy time; more files mean (a) longer cold-start deploy resolution and (b) more import statements at the top of `index.ts` and `outcomes.ts`. → **Mitigation:** Deno bundle resolution is fast (file count below ~50 is not measurable for the edge runtime); the import block at the top of `index.ts` is its own readable index of what the function does. Net positive.
+
+- **`outcomes.ts` is the largest new module (~200 lines).** [Risk] If it keeps growing as new disposition routes get added, it re-creates the same "scroll-fatigue" problem we just solved in `handlePost`. → **Mitigation:** D9 codifies the rule. If `outcomes.ts` crosses ~300 lines, split *along the disposition axis* (one file per terminal lifecycle, e.g., `outcomes/sent.ts`, `outcomes/failed.ts`) — not along stages — so the rule "one writer per terminal state" is preserved.
+
+- **Test stubs for the new modules don't exist yet.** [Risk] The refactor unblocks tests but doesn't write them, so the modules' importability promise is unverified until someone tries it. → **Mitigation:** acceptable — the refactor's own success criterion is "imports work + `deno lint` passes + manual staging tests pass". A follow-up change introduces a `test/` directory.
 
 - **Linter still reports `no-import-prefix` × 3 after this PR.** [Risk] CI may be configured to fail on lint errors. → **Mitigation:** check CI before merge. If CI does fail, the `deno.json` imports-map work is a prerequisite, not a follow-up — bump it into this change. Default assumption: CI either does not run `deno lint` on edge functions or treats these specific rules as warnings; verify during task 6.
 
 ## Migration Plan
 
-Single PR, single deploy. No DB migration. Steps:
+Single PR, single deploy. No DB migration. Two passes:
 
-1. Create the three sibling modules (`error-parsing.ts`, `disposition.ts`, `hashing.ts`) with the extracted code. Drop `async` from `hashEmail` / `hashPhone` in the move.
-2. Rewrite `index.ts` to import from the new modules and house the 13 phase functions + the slimmed `handlePost`.
+**Pass C₁ (already landed in this branch):**
+
+1. Create the three pure-helper modules (`error-parsing.ts`, `disposition.ts`, `hashing.ts`). Drop `async` from `hashEmail` / `hashPhone` in the move.
+2. Rewrite `index.ts` to import from those three modules and house the 13 phase functions + the slimmed `handlePost`.
 3. Apply the four spec-compliance fixes (D1–D4) inside the relevant extracted phases.
 4. Run `deno lint` to confirm `require-await` is gone (5 → 3 findings expected).
-5. Deploy to a staging Supabase project; trigger a manual invocation with a small batch of seeded rows; verify the function logs the same set of "UPLOADED" / "ROW_FAILED" / "expired" lines as before.
-6. Deploy to production.
+
+**Pass C₂ (this update — full Option C):**
+
+5. Create `types.ts` with every domain interface moved out of `index.ts` (no code change beyond the move).
+6. Create `runtime.ts` with `corsHeaders`, `json`, `getSupabase` moved out (no code change beyond the move).
+7. Create `pause-state.ts` with `checkPipelinePause` moved out + the new `tripPipelinePause` helper that takes the pause metadata as arguments.
+8. Create `pickup.ts` with `loadDispositions`, `selectAndExpire`, `loadConfig` moved out.
+9. Create `payload-builder.ts` with `classifyRows`, `buildPayloads` moved out.
+10. Create `ads-api.ts` with `callGoogleAds` moved out.
+11. Create `batches.ts` with `createBatch`, `markSending` moved out.
+12. Create `outcomes.ts` with `markNoIdExcluded`, `handleBatchFailure` (refactored to call `tripPipelinePause` from `pause-state.ts`), and `applyPerRowOutcomes` moved out.
+13. Slim `index.ts` to imports + `handlePost` + `Deno.serve` (~70 lines).
+14. Re-run `deno lint` and `deno check` over all 11 files; confirm 3 expected `no-import-prefix` findings remain on `index.ts` and that no new findings appear in the new modules.
+15. Deploy to staging; re-run the manual tests from C₁ to confirm no behavior change.
+16. Deploy to production.
 
 **Rollback:** revert the PR. No DB state is affected by the rollback — the new column-clearing behavior just produces nicer view rows; rolling back leaves slightly inconsistent rows that the next forward-fix re-cleans.
 

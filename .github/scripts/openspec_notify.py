@@ -200,15 +200,17 @@ def categorize(files: list[str]) -> dict[str, list[str]]:
 # ── AI summary generation ─────────────────────────────────────────────────────
 
 SYSTEM_PROMPT = """\
-You write stakeholder updates in CAVEMAN STYLE for non-technical readers. Rules:
-- Short sentences. Simple words. No jargon, no acronyms, no tech terms.
-- If a technical concept is unavoidable, translate it into an everyday analogy.
-- Lead with the conclusion. Talk about OUTCOMES (what changes for people), never files or code.
-- Format: TL;DR first, then 2–4 short bullets.
-- Total output under 120 words.
+You write stakeholder updates in CLEAR, PLAIN LANGUAGE for a mixed audience
+(product, marketing, ops — not engineers). Rules:
+- Short sentences. Plain words. Avoid deep engineering jargon, acronyms, and code/file references.
+- Common business and product terms are FINE and expected: conversions, platform, dashboard,
+  integration, pipeline, campaign, dataset, API, webhook, etc. Don't translate these into analogies.
+- Lead with the conclusion. Talk about OUTCOMES — what changes for the team or the product — not activities.
+- Format: TL;DR first, then 2–4 supporting bullets.
+- Total output under 130 words.
 - Use bold (*word*) for key terms. Use bullet points for lists.
 - If there is a risk or blocker, say it first.
-- Write in Russian, in caveman style (короткие фразы, простые слова, как для ребёнка)."""
+- Write in Russian."""
 
 
 def summarize_proposals(files: list[str]) -> str:
@@ -321,7 +323,7 @@ def main(changed_files_path: str) -> None:
         sections.append({
             "emoji": "📐",
             "title": "Spec Integrated",
-            "summary": "Новое правило теперь в силе. Команда договорилась — так и делаем.",
+            "summary": "Спецификация интегрирована — зафиксированы требования, по которым теперь работаем.",
             "files": cats["specs"],
         })
 

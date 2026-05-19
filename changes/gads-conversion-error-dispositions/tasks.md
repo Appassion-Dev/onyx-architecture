@@ -53,7 +53,7 @@
 - [x] 6.4 Handle unknown `error_code` by defaulting to `lifecycle = 'needs-attention'` (the `fix-triage` default behavior)
 - [x] 6.5 Build the UPDATE that writes `error_code`, `error_namespace`, `error_detail`, `lifecycle`, `status` (per parallel-write mapping), `last_attempt_at = now()`, `batch_id`, increments `attempt_count` and `upload_attempts`
 - [x] 6.6 For successful rows in a partial-failure response, set `lifecycle = 'sent'`, `status = 'uploaded'`, `uploaded_at = now()`, clear `error_code`/`error_namespace`/`error_detail`
-- [ ] 6.7 Manual test: send a synthetic partial-failure response through the parser locally; verify per-row routing for `retry`, `fix-config`, `drop` codes — **user to run with a synthetic fixture**
+- [x] 6.7 Manual test: send a synthetic partial-failure response through the parser locally; verify per-row routing for `retry`, `fix-config`, `drop` codes — automated as Deno unit tests in `supabase/functions/google-ads-conversion-upload/outcomes.test.ts` ("task 39: …"). 4 cases pass: retry/fix-config/drop/success routing, unknown-code fix-triage default, multi-namespace key extraction, out-of-range index discard.
 
 ## 7. Edge function — batch-level failures and pause trip
 
@@ -61,7 +61,7 @@
 - [x] 7.2 Write the batch row with `request_error_code`, `request_error_message`, `accepted_count = 0`, `rejected_count = 0`
 - [x] 7.3 For rows that were in the failed batch: increment `attempt_count`, set `last_attempt_at`, set `batch_id`, but leave `lifecycle = 'queued'` (do NOT mark needs-attention)
 - [x] 7.4 If the batch-level `error_code` has `disposition = 'fix-config'` in the disposition map, UPDATE `gads_pipeline_state` setting `paused = true`, `paused_reason`, `paused_error_code`, `paused_batch_id`, `paused_at`
-- [ ] 7.5 Manual test: send a synthetic batch-level `fix-config` response; verify pause trips and constituent rows stay `queued` — **user to run with a synthetic fixture**
+- [x] 7.5 Manual test: send a synthetic batch-level `fix-config` response; verify pause trips and constituent rows stay `queued` — automated as Deno unit tests in `supabase/functions/google-ads-conversion-upload/outcomes.test.ts` ("task 44: …"). 4 cases pass: fix-config trips pause + rows queued, retry-disposition does NOT pause, HTTP non-2xx synthesizes `http.N`, network error synthesizes `network.error`.
 
 ## 8. FE — chip rendering (phase-cell-upload)
 

@@ -1,7 +1,7 @@
 ## Requirements
 
 ### Requirement: PhaseCell shows upload action on hover for pending and error states
-A `PhaseCell` with `status === 'pending'` or `status === 'error'` SHALL display an upload icon when the user hovers over the cell, replacing the status icon.
+A `PhaseCell` with `status === 'pending'` or `status === 'error'` SHALL display an upload icon when the user hovers over the cell, replacing the status icon. This behavior applies wherever a PhaseCell is rendered (currently: inside the expanded StageDetail panel on the Conversions page).
 
 #### Scenario: Hover reveals upload icon on pending cell
 - **WHEN** a user hovers over a PhaseCell with `booking_status`, `qualified_status`, or `converted_status` equal to `'pending'`
@@ -45,3 +45,18 @@ When any upload is triggered and the relevant conversion type has `dry_run: true
 #### Scenario: Dry-run warning in bulk upload modal
 - **WHEN** the bulk upload Dialog confirm modal is shown and at least one affected conversion type has `dry_run: true`
 - **THEN** the modal SHALL display a warning: "⚠ One or more conversion types are in dry-run mode — those uploads will be simulated, not sent to Google Ads"
+
+### Requirement: PhaseCell is not rendered in the per-row pipeline column
+The PhaseCell SHALL NOT be rendered inside the per-estimate row layout of `PipelineRowItem`. The row layout SHALL show the estimate label and inline value only — no framed upload card on the right side. The PhaseCell continues to render inside the expanded StageDetail panel, where it provides the row-level upload affordance.
+
+#### Scenario: Collapsed row has no PhaseCell
+- **WHEN** a PipelineRowItem is rendered in any conversion mode and is NOT expanded
+- **THEN** no PhaseCell SHALL appear on the row
+
+#### Scenario: Expanded row exposes per-stage PhaseCell
+- **WHEN** a PipelineRowItem is expanded and the StageDetail panel is rendered for a stage with an actionable status (`pending` or error)
+- **THEN** the StageDetail panel SHALL include a PhaseCell for that stage, retaining all PhaseCell hover / countdown / dry-run behavior described in the other requirements of this capability
+
+#### Scenario: PhaseCell is removed from `pre-discovery` and other layouts
+- **WHEN** the active mode is `pre-discovery`, `booking`, `qualified`, `converted`, or `all`
+- **THEN** no PhaseCell SHALL appear in the row's top-level grid (regardless of mode)

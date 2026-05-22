@@ -158,11 +158,15 @@ sequenceDiagram
 
     CRON->>FN: HTTP POST (service role key)
 
-    FN->>DB: SELECT * FROM gads_conversion_uploads<br/>WHERE status = 'pending'
-    DB-->>FN: Pending rows
+    FN->>DB: SELECT * FROM gads_pipeline_state
+    DB-->>FN: { paused }
+    Note over FN: If paused = true → return early
 
-    FN->>DB: UPDATE status = 'expired'<br/>WHERE conversion_datetime < NOW() - 90 days
-    
+    FN->>DB: SELECT * FROM gads_conversion_uploads<br/>WHERE status = 'pending'
+    DB-->>FN: Pending rows (lifecycle queued/sending/retrying)
+
+    FN->>DB: UPDATE lifecycle='expired', status='expired'<br/>WHERE conversion_datetime < NOW() - 90 days
+
     FN->>DB: SELECT * FROM gads_conversion_config
     DB-->>FN: { conversion_action_id, enabled, dry_run } per type
 
@@ -171,20 +175,34 @@ sequenceDiagram
         FN->>FN: Skip (log only) if config.dry_run = true
         FN->>DB: SELECT email, mobile_number<br/>FROM customers WHERE id = customer_id
         DB-->>FN: Customer PII
-        FN->>FN: Normalize + SHA-256 hash<br/>email and phone (enhanced conversions)
-        FN->>FN: Build conversion payload<br/>{ gclid, conversionDateTime,<br/>conversionValue, userIdentifiers }
+        FN->>FN: Classify method:<br/>with_gclid / user_data_only / none
+        alt method = none
+            FN->>DB: UPDATE lifecycle='excluded', status='skipped'
+        else
+            FN->>FN: Normalize + SHA-256 hash<br/>email and phone (enhanced conversions)
+            FN->>FN: Build conversion payload<br/>{ gclid?, conversionDateTime,<br/>conversionValue, userIdentifiers }
+            FN->>DB: UPDATE lifecycle='sending', batch_id=<new>
+        end
     end
 
+    FN->>DB: INSERT gads_conversion_upload_batches<br/>(sent_at, conversion_type, row_count, request_body)
     FN->>GA: POST customers/{id}/googleAds:uploadClickConversions<br/>Authorization: Bearer {access_token}<br/>developer-token + login-customer-id headers
     GA-->>FN: { results: [ { status, error? } ] }
+    FN->>DB: UPDATE gads_conversion_upload_batches<br/>SET http_status, response_body, accepted_count, rejected_count
 
     loop For each result
         alt Accepted
-            FN->>DB: UPDATE status = 'uploaded'<br/>uploaded_at = NOW()
-        else No GCLID / no identifiers
-            FN->>DB: UPDATE status = 'skipped'
+            FN->>DB: UPDATE lifecycle='sent', status='uploaded',<br/>uploaded_at = NOW()
         else API error
-            FN->>DB: UPDATE status = 'failed'<br/>error_message, upload_attempts++
+            FN->>DB: Look up disposition for error_code
+            DB-->>FN: { disposition, max_attempts, retry_after }
+            alt disposition = retry AND attempt_count < max_attempts
+                FN->>DB: UPDATE lifecycle='retrying', status='pending',<br/>attempt_count++, last_attempt_at=NOW()
+            else disposition = fix-config/data/triage
+                FN->>DB: UPDATE lifecycle='needs-attention', status='failed',<br/>error_code, error_namespace, error_detail
+            else disposition = drop/deliberate or attempts exhausted
+                FN->>DB: UPDATE lifecycle='failed', status='failed'
+            end
         end
     end
 ```
@@ -389,11 +407,19 @@ Enables cross-estimate, customer-scoped first-touch attribution for the Qualifie
 
 **Population — pre-pass in `discover_pending_conversions()`:**  
 Before discovery runs, the pre-pass upserts `customer_gclids` rows from two sources:
-1. `booking_tags` where `key = 'gclid'` → source = `'booking_form'`
+1. `booking_tags` where `key = 'gclid'` → source = `'booking_form'` (joined via `estimates → customers`)
 2. `callrail_leads` where `gclid IS NOT NULL` and `customer_id IS NOT NULL` → source = `'callrail'`
 
+The CallRail branch joins **directly** on `callrail_leads.customer_id` (not through `estimates`), so calls that correlate to a customer before any HCP estimate exists still produce a usable first-touch GCLID once the estimate is later created.
+
 **First-touch resolution (with click lookback window):**  
-When the pipeline needs a GCLID for Qualified/Converted stages, it queries `customer_gclids`, filters to rows within the click lookback window (`first_seen_at >= conversion_datetime - INTERVAL '90 days'`), and picks the earliest eligible `first_seen_at` (first-touch within window). If no GCLID is within the window, the value is NULL and the upload phase falls back to enhanced conversions.
+When the pipeline needs a GCLID for Qualified/Converted stages, it queries `customer_gclids`, filters to rows within the click lookback window (`first_seen_at >= conversion_datetime - INTERVAL '90 days'`), and picks the earliest eligible `first_seen_at` (first-touch within window). If no GCLID is within the window, the value is NULL and the upload phase falls back to enhanced conversions (hashed email/phone).
+
+**Lookback enforcement at discovery time:**  
+The click lookback is enforced inside the discovery SQL functions, not at upload time. `get_pending_qualified_lead_conversions()` anchors the window on `estimates.updated_at`; `get_pending_converted_lead_conversions()` anchors on `MAX(approved estimate_options.updated_at)`. This prevents perpetually-pending rows caused by GCLIDs older than the API's acceptance window.
+
+**Stale-pending cleanup:**  
+Each discovery cycle additionally re-checks pending `gads_conversion_uploads` rows. Any row whose stored `gclid` was first seen more than 90 days before its `conversion_datetime` has the `gclid` column set to NULL, so the next upload attempt falls back to enhanced conversions instead of repeatedly hitting `CLICK_NOT_FOUND`.
 
 **Google Ads — two independent time constraints:**
 
@@ -458,20 +484,64 @@ After any implementation that changes the behavior of a pipeline stage, this spe
 #### Discovery cron (every 15 min):
 ```
 discover_pending_conversions()
-  ├─ Pre-pass: upsert customer_gclids from booking_tags + callrail_leads
+  ├─ Pre-pass A: upsert customer_gclids from booking_tags (via estimates→customers)
+  ├─ Pre-pass B: upsert customer_gclids from callrail_leads (direct customer_id join)
+  ├─ Stale-pending cleanup: NULL gclid on pending rows whose click is outside lookback
   ├─ IF booking_lead.enabled: get_pending_booking_lead_conversions() → INSERT pending rows
   ├─ IF qualified_lead.enabled: get_pending_qualified_lead_conversions() → INSERT pending rows
   └─ IF converted_lead.enabled: get_pending_converted_lead_conversions() → INSERT pending rows
-     (all INSERT … ON CONFLICT DO NOTHING — idempotent)
+     (all INSERT … ON CONFLICT DO NOTHING — idempotent; new rows are created with
+      lifecycle = 'queued')
 ```
 
-#### Upload state machine:
-```
-pending ──► uploaded   (Google Ads accepted)
-       ──► skipped     (no GCLID, no hashed identifiers)
-       ──► expired     (conversion_datetime > 90 days)
-       ──► failed      (API error; retry on next run; increments upload_attempts)
-```
+#### Upload lifecycle state machine:
+
+`gads_conversion_uploads` carries both a legacy `status` and a richer `lifecycle` column. A CHECK constraint enforces the mapping so existing readers of `status` keep working during the deprecation window.
+
+| lifecycle         | status     | meaning                                                       |
+|-------------------|------------|---------------------------------------------------------------|
+| `queued`          | `pending`  | discovered, not yet attempted                                 |
+| `sending`         | `pending`  | included in a batch currently in flight                       |
+| `sent`            | `uploaded` | accepted by Google Ads                                        |
+| `retrying`        | `pending`  | failed previously, disposition = `retry`, will retry          |
+| `needs-attention` | `failed`   | manual triage required (disposition = `fix-*`)                |
+| `failed`          | `failed`   | terminal failure (no retry; disposition = `drop`/`deliberate` exhausted) |
+| `excluded`        | `skipped`  | no GCLID and no hashed identifiers — nothing to upload        |
+| `expired`         | `expired`  | `conversion_datetime > 90 days` at upload time                |
+
+Transitions are driven by `gads_error_dispositions` (see Stage 10a).
+
+---
+
+### Stage 9a: Error Disposition & Batch Tracking
+
+**Tables:**
+
+| Table | Purpose |
+|---|---|
+| `gads_error_dispositions` | Master lookup: one row per `error_code` (e.g. `conversionUploadError.CLICK_NOT_FOUND`) → `disposition`, `max_attempts`, `retry_after_seconds`, `no_alert`, `human_action`, `notes`, `source` (`override` or `proto-*`). Seeded with ~107 Google Ads API v23 error codes. |
+| `gads_conversion_upload_batches` | One row per HTTP call to `uploadClickConversions`. Records `sent_at`, `job_id`, `http_status`, `request_error_code`, `request_error_message`, `row_count`, `accepted_count`, `rejected_count`, `conversion_type`, plus raw `request_body` and `response_body` JSON for replay/audit. |
+| `gads_pipeline_state` | Singleton (`id = 1`). Operator pause switch: `paused`, `paused_reason`, `paused_error_code`, `paused_batch_id`, `paused_at`, `resumed_at`, `resumed_by`. |
+
+**New columns on `gads_conversion_uploads`:**
+- `lifecycle` — see state machine above
+- `error_code`, `error_namespace`, `error_detail` (JSONB) — structured Google Ads error
+- `last_attempt_at`, `attempt_count` — retry bookkeeping
+- `batch_id` — FK into `gads_conversion_upload_batches`
+
+**Dispositions:**
+
+| Disposition  | Behavior |
+|--------------|----------|
+| `retry`      | Re-queue (lifecycle `retrying`) until `attempt_count >= max_attempts`, respecting `retry_after_seconds` |
+| `fix-config` | Move to `needs-attention`; surface `human_action` text in NeedsAttentionInbox |
+| `fix-data`   | Same as above, but the recommended fix is to data rather than config |
+| `fix-triage` | Same as above, but requires manual investigation (no canned remediation) |
+| `drop`       | Move to terminal `failed`. If `no_alert = true`, suppressed from dashboards |
+| `deliberate` | Treated like `drop` but documents that the failure is expected (e.g. test rows) |
+
+**Pause behavior:**  
+The upload edge function reads `gads_pipeline_state` at the start of each run. If `paused = true`, the run returns early without touching any row. The dashboard surfaces a `PausedBanner` in this state. Pause is intended for incident response when a systemic error (auth, quota, schema) would otherwise cause a flood of failures.
 
 ---
 
@@ -482,20 +552,29 @@ pending ──► uploaded   (Google Ads accepted)
 
 **Execution sequence:**
 
-1. Read all `gads_conversion_uploads` rows with `status = 'pending'`
-2. For rows where `conversion_datetime < NOW() - 90 days` → set `status = 'expired'`
-3. For each remaining pending row:
+1. Read `gads_pipeline_state` (singleton). If `paused = true`, return early.
+2. Read all `gads_conversion_uploads` rows with `status = 'pending'` (i.e. lifecycle in `queued`/`sending`/`retrying`).
+3. For rows where `conversion_datetime < NOW() - 90 days` → set `lifecycle = 'expired'` (`status = 'expired'`).
+4. For each remaining pending row:
    a. Look up `gads_conversion_config` for this `conversion_type`
    b. If `enabled = false` → skip
    c. If `dry_run = true` → log but do not call Google Ads API
    d. Resolve `conversion_action` resource name: `customers/{customer_id}/conversionActions/{action_id}`
-   e. Build conversion payload:
-      - `gclid` (from the upload row)
+   e. Classify upload method:
+      - `with_gclid` — GCLID set on the upload row
+      - `user_data_only` — no GCLID but customer has hashed email/phone
+      - `none` → set `lifecycle = 'excluded'`, skip
+   f. Build conversion payload:
+      - `gclid` (from the upload row, if present)
       - `conversionDateTime` (formatted as `YYYY-MM-DD HH:MM:SS+00:00`)
       - `conversionValue` (if present)
       - `userIdentifiers` with SHA-256 hashed email and/or phone from `customers` table (enhanced conversions)
-4. Batch all payloads into a single `uploadClickConversions` API call
-5. Process response — update each row's `status`, `uploaded_at`, `error_message`, `conversion_action` (for audit)
+   g. Set `lifecycle = 'sending'`, attach a new or current `batch_id`.
+5. Batch all payloads into a single `uploadClickConversions` API call. Insert a `gads_conversion_upload_batches` row with `request_body` (the JSON sent) and `response_body` (the JSON received, or a structured error envelope on network failure).
+6. Process response — for each row:
+   - **Accepted** → `lifecycle = 'sent'`, `status = 'uploaded'`, `uploaded_at = now()`
+   - **Rejected with error_code** → look up disposition in `gads_error_dispositions`; transition lifecycle to `retrying`, `needs-attention`, or `failed` per the disposition table; persist `error_code`, `error_namespace`, `error_detail`, `error_message`, increment `attempt_count`/`upload_attempts`.
+   - **Batch-level (HTTP) failure** → update batch row with `http_status`/`request_error_code`; member rows revert to `queued` for the next run unless the disposition pauses the pipeline.
 
 **Enhanced conversions:**  
 Customer `email` is normalized (lowercase, trim) then `SHA-256` hashed. Phone is normalized (E.164 format) then `SHA-256` hashed. These are sent as `userIdentifiers` alongside the GCLID to improve match rates for conversions where the GCLID may have expired or be unavailable.
@@ -541,21 +620,35 @@ Uses GAQL to query yesterday's `campaign.id`, `ad_group.id`, `metrics.cost_micro
 
 | Route | Page | Data source |
 |---|---|---|
-| `/conversions/uploads` | `ConversionsPage` | `vw_conversion_candidates` direct query |
+| `/conversions` | redirect → `/conversions/uploads` | — |
+| `/conversions/uploads` | `ConversionsPage` (Pipeline tab) | `vw_conversion_candidates` direct query |
+| `/conversions/needs-attention` | `NeedsAttentionInbox` | pending rows with lifecycle `needs-attention` |
+| `/conversions/batches` | `BatchesPanel` | `gads_conversion_upload_batches` with raw payloads |
+| `/conversions/dispositions` | `DispositionsAdminPage` | `gads_error_dispositions` (override editor over proto seed) |
+| `/conversions/upload-report` | `UploadReportPage` | `vw_gads_upload_reconciliation_daily` |
+| `/conversions/config` | `ConversionConfigPage` | `GET/PUT /functions/v1/gads-conversion-config` |
 | `/online-bookings` | `OnlineBookingsPage` | `vw_booking_estimates` direct query |
 | `/calls` | `CallsPage` | `vw_callrail_leads` direct query |
 | `/marketing` | `MarketingPage` | `ads_campaign_stats`, `gads_attribution_snapshots` |
-| `/sales` | `SalesPage` | `fn_get_sales_table_data()` RPC |
-| `/conversions/config` | `ConversionConfigPage` | `GET/PUT /functions/v1/gads-conversion-config` |
-| `/conversions/upload-report` | `UploadReportPage` | `vw_gads_upload_reconciliation_daily` |
+| `/sales`, `/sales/dev` | `SalesPage`, `SalesDevPage` | `fn_get_sales_table_data()` RPC |
+| `/salary`, `/commissions` | `SalaryPage`, `CommissionsPage` | commission RPCs (`func_commission_*` edge functions) |
+| `/employees`, `/assignments` | `EmployeeManagerPage`, `SalesAssignmentManagerPage` | `employees`, sales-assignment views |
+| `/admin` | `AdminPage` | mixed admin tooling |
+
+`ConversionsPage` wraps the Pipeline / Needs Attention / Batches tabs in a shared `WorkbenchTabs` shell with a right-aligned link to `/conversions/dispositions` (Configure). A `PausedBanner` is rendered across all conversion pages when `gads_pipeline_state.paused = true`.
 
 **`vw_conversion_candidates` — central pipeline view:**  
 One row per estimate with any lead signal. Columns include:
 - `channel` (7-value taxonomy, computed via CASE chain — see Stage 5)
-- `booking_lead_status`, `qualified_lead_status`, `converted_lead_status` — upload status pivoted per stage
+- Per-stage status: `booking_lead_status`, `qualified_lead_status`, `converted_lead_status`
+- Per-stage lifecycle + disposition: `booking_lifecycle`, `booking_error_code`, `booking_disposition`, `booking_no_alert`, `booking_human_action`, `booking_attempt_count`, `booking_max_attempts` (and the matching `qualified_*` / `converted_*` columns)
 - `first_touch_medium`, `all_gclids` — attribution metadata
 - `is_closed` — whether the estimate is in a terminal HCP status
+- Customer identifiers: `customer_email`, `customer_mobile`, `customer_street`, `customer_city`, `customer_state`, `customer_zip` — used to compute the dashboard's `with_gclid` / `user_data_only` / `none` method classifier and to populate the expanded detail panel
 - Call aggregation columns from correlated `callrail_leads`
+
+**`export_converted_leads(p_from_date, p_to_date)` RPC:**  
+Used by ConversionsPage "Export CSV". Returns one row per converted estimate in the date range with: estimate id/number, customer name/email/phone, channel, lead source, first-touch medium, all GCLIDs, CallRail source/campaign, per-stage `(status, gclid, value, conversion_action, conversion_datetime, uploaded_at, error_message, upload_attempts)`, plus assigned employee, job id, job work status, job total, invoice number.
 
 ---
 
@@ -587,3 +680,11 @@ All configuration is stored as JSONB singletons in Supabase, read/written by cor
 #### Scenario: GCLID first-touch model is documented
 - **WHEN** a developer needs to understand why a conversion uses a different GCLID than the booking_tag
 - **THEN** the spec SHALL explain the customer_gclids table, its population pre-pass, and first-touch selection logic
+
+#### Scenario: Error disposition and lifecycle are documented
+- **WHEN** a developer needs to understand why a row is in `needs-attention`, `retrying`, or `failed`
+- **THEN** the spec SHALL describe the `gads_error_dispositions` lookup, the `lifecycle ↔ status` mapping, the batch-tracking table, and the global pause switch (`gads_pipeline_state`)
+
+#### Scenario: Click lookback enforcement is documented
+- **WHEN** a developer needs to understand why a pending conversion has no GCLID despite one being present on the booking
+- **THEN** the spec SHALL describe the two independent windows (upload recency vs. click lookback), the discovery-time enforcement inside `get_pending_qualified_lead_conversions()` and `get_pending_converted_lead_conversions()`, and the stale-pending cleanup that nulls GCLIDs outside the window

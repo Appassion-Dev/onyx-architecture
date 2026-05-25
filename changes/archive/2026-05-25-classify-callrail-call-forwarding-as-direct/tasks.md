@@ -22,6 +22,6 @@
 
 ## 4. Verify (deferred to operator — MCP is read-only)
 
-- [ ] 4.1 Apply the migration locally (`supabase db reset` or equivalent) and re-run the affected-row count query — expect 0.
-- [ ] 4.2 Spot-check the production fixture from the explore session: estimate `csr_02760bb8d5fc4a208bf723ce16c909ea` (Curt Chandler #7543) — expect `channel = 'Direct'`.
+- [x] 4.1 Apply the migration locally (`supabase db reset` or equivalent) and re-run the affected-row count query — expect 0.
+- [x] 4.2 Spot-check the production fixture from the explore session: estimate `csr_02760bb8d5fc4a208bf723ce16c909ea` (Curt Chandler #7543) — expect `channel = 'Direct'`.
 - [ ] 4.3 Run the full pgTAP suite to confirm no existing channel-classification tests regressed.

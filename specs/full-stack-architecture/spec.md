@@ -133,7 +133,7 @@ sequenceDiagram
 
     DB->>CFG: Check qualified_lead.enabled
     CFG-->>DB: enabled = true
-    DB->>DB: get_pending_qualified_lead_conversions()<br/>→ work_status complete + priced options<br/>GCLID from customer_gclids (first_seen_at ASC,<br/>filtered: first_seen_at >= conversion_datetime - 90d)
+    DB->>DB: get_pending_qualified_lead_conversions()<br/>→ approved priced option (approval_status + total_amount > 0)<br/>GCLID from customer_gclids (first_seen_at ASC,<br/>filtered: first_seen_at >= conversion_datetime - 90d)
     DB->>DB: INSERT INTO gads_conversion_uploads<br/>(estimate_id, 'qualified_lead', 'pending', gclid,<br/>value = AVG(options) / 100)<br/>ON CONFLICT DO NOTHING
 
     Note over DB: Stage 3 — Converted Lead detection
@@ -418,8 +418,8 @@ When the pipeline needs a GCLID for Qualified/Converted stages, it queries `cust
 **Lookback enforcement at discovery time:**  
 The click lookback is enforced inside the discovery SQL functions, not at upload time. `get_pending_qualified_lead_conversions()` anchors the window on `estimates.updated_at`; `get_pending_converted_lead_conversions()` anchors on `MAX(approved estimate_options.updated_at)`. This prevents perpetually-pending rows caused by GCLIDs older than the API's acceptance window.
 
-**Stale-pending cleanup:**  
-Each discovery cycle additionally re-checks pending `gads_conversion_uploads` rows. Any row whose stored `gclid` was first seen more than 90 days before its `conversion_datetime` has the `gclid` column set to NULL, so the next upload attempt falls back to enhanced conversions instead of repeatedly hitting `CLICK_NOT_FOUND`.
+**Stale-pending cleanup (one-time backfill):**  
+Migration `20260511000003_gclid_stale_pending_cleanup.sql` ran a single `UPDATE`: any pending `gads_conversion_uploads` row whose stored `gclid` was first seen more than 90 days before its `conversion_datetime` had its `gclid` set to NULL, so the next upload attempt falls back to enhanced conversions instead of repeatedly hitting `CLICK_NOT_FOUND`. This was a one-shot backfill, **not** a recurring guard — `discover_pending_conversions()` does not re-null stale GCLIDs on existing pending rows. (A recurring re-attribution pass is proposed in the `conversion-attribution-overhaul` change but is not yet implemented.)
 
 **Google Ads — two independent time constraints:**
 
@@ -454,6 +454,12 @@ After any implementation that changes the behavior of a pipeline stage, this spe
 
 #### Stage 9a: Booking Lead
 
+**In plain terms:** This stage is discovered the moment a lead exists at all — someone submitted the online booking form, called a tracked number that got matched to them, or arrived with any identifiable lead source. It is the "a potential customer asked for service" signal, the earliest point in the funnel. Nothing has been priced yet, so no dollar value is attached.
+
+Estimates that carry **none** of these signals — not from the booking form, no tracking tags, no matched call, and no lead source recorded — are deliberately **not** discovered. These are typically estimates entered by hand in HousecallPro (walk-ins, repeat clients, internal records) with no marketing origin to attribute a conversion to. Reporting them to Google Ads would credit it with leads it never drove, inflating conversion counts with traffic it can't optimize against.
+
+These estimates are still **visible** in the dashboard's conversions pipeline — `vw_conversion_candidates` lists every estimate, not just discovered ones — where they appear as **pre-discovery** rows: all three stages read "Not discovered" and the Booking Lead detail shows "No attribution data detected." Not being discovered means no conversion is uploaded; it does not mean the estimate is hidden from operators.
+
 | Field | Value |
 |---|---|
 | Trigger condition | `is_booking_form = true` OR `booking_tags` rows exist OR `callrail_leads` correlated OR `lead_source IS NOT NULL` |
@@ -463,16 +469,20 @@ After any implementation that changes the behavior of a pipeline stage, this spe
 
 #### Stage 9b: Qualified Lead
 
+**In plain terms:** This stage is discovered once the customer has approved at least one *priced* option on their estimate — a real, costed quote was put in front of them and they signed off on something worth more than $0. It marks the lead becoming a genuine, money-on-the-table opportunity. The value recorded is the average of all quoted options — a representative figure for what a job like this is worth.
+
 | Field | Value |
 |---|---|
-| Trigger condition | `work_status IN ('complete rated', 'complete unrated')` AND at least one `estimate_option.total_amount > 0` |
+| Trigger condition | At least one `estimate_option` with `approval_status IN ('approved', 'pro approved')` AND `total_amount > 0` |
 | `conversion_datetime` | `estimates.updated_at` at time of qualification |
 | `conversion_value` | `AVG(all estimate_options.total_amount) / 100.0` (dollars) |
 | GCLID source | `customer_gclids` first-touch (earliest `first_seen_at`) |
 
-**Note:** Uses the customer-level GCLID, not the estimate-level one, because by this stage the technician has visited and the estimate has been priced. The customer may have multiple estimates; first-touch ensures the original acquisition channel gets credit.
+**Note:** Uses the customer-level first-touch GCLID, not the estimate-level one: the customer may have multiple estimates, and first-touch ensures the original acquisition channel gets credit.
 
 #### Stage 9c: Converted Lead
+
+**In plain terms:** This stage is discovered when the customer commits to actual work — at least one option on the estimate is approved. It is the "the customer bought" signal at the bottom of the funnel. The value recorded is the real total of everything they approved — the actual revenue won, rather than the averaged estimate used for the Qualified stage.
 
 | Field | Value |
 |---|---|
@@ -486,7 +496,6 @@ After any implementation that changes the behavior of a pipeline stage, this spe
 discover_pending_conversions()
   ├─ Pre-pass A: upsert customer_gclids from booking_tags (via estimates→customers)
   ├─ Pre-pass B: upsert customer_gclids from callrail_leads (direct customer_id join)
-  ├─ Stale-pending cleanup: NULL gclid on pending rows whose click is outside lookback
   ├─ IF booking_lead.enabled: get_pending_booking_lead_conversions() → INSERT pending rows
   ├─ IF qualified_lead.enabled: get_pending_qualified_lead_conversions() → INSERT pending rows
   └─ IF converted_lead.enabled: get_pending_converted_lead_conversions() → INSERT pending rows

@@ -491,6 +491,19 @@ These estimates are still **visible** in the dashboard's conversions pipeline �
 | `conversion_value` | `SUM(approved estimate_options.total_amount) / 100.0` (dollars) |
 | GCLID source | `customer_gclids` first-touch |
 
+#### GCLID source — Qualified vs Converted
+
+Both Qualified and Converted select the earliest `customer_gclids.gclid` for the customer (`ORDER BY first_seen_at ASC LIMIT 1`). They differ in **the reference point for the 90-day click-lookback filter**, which mirrors each stage's own `conversion_datetime`:
+
+| Stage | Lookback anchor | Filter |
+|---|---|---|
+| Qualified | `estimates.updated_at` | `cg.first_seen_at >= e.updated_at - INTERVAL '90 days'` |
+| Converted | `MAX(estimate_options.updated_at) WHERE approval_status IN ('approved','pro approved')` | `cg.first_seen_at >= MAX(approved eo.updated_at) - INTERVAL '90 days'` |
+
+Because the Converted window opens later (only when an option is approved), a click within range at qualification time may fall outside it at conversion time. In that case the Qualified row ships a GCLID and the Converted row ships NULL → enhanced-conversions fallback at upload.
+
+Distinct from Booking Lead, which uses the per-estimate `booking_tags.gclid` or correlated `callrail_leads.gclid` directly, not `customer_gclids`.
+
 #### Discovery cron (every 15 min):
 ```
 discover_pending_conversions()

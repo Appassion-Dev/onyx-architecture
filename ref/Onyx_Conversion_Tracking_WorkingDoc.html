@@ -76,6 +76,29 @@
   .lean { color: var(--imm); font-weight: 600; }
 
   .foot { margin-top: 40px; padding-top: 14px; border-top: 1px solid var(--line); font-family: "SF Mono","Courier New", monospace; font-size: 11px; color: var(--faint); display: flex; justify-content: space-between; }
+
+  /* ===== AUDIT ANNOTATIONS (added 2026-06-02) ===== */
+  .audit { border: 1px solid #e3b9b9; background: #fcf5f4; border-left: 5px solid #A32D2D; border-radius: 8px; padding: 14px 16px; margin: 12px 0 0 38px; }
+  .audit.ok { border-color:#bcd8a6; background:#f4f9ee; border-left-color:#27500A; }
+  .audit.warn { border-color:#f0d9a8; background:#fff8ec; border-left-color:#b07712; }
+  .audit-h { font-family:"SF Mono","Courier New",monospace; font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#A32D2D; margin-bottom:9px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .audit.ok .audit-h { color:#27500A; } .audit.warn .audit-h { color:#8a5a12; }
+  .sev { display:inline-block; font-family:"SF Mono","Courier New",monospace; font-size:9.5px; font-weight:700; padding:2px 8px; border-radius:10px; letter-spacing:0.03em; white-space:nowrap; }
+  .sev-crit { background:#A32D2D; color:#fff; } .sev-high { background:#d96b2b; color:#fff; }
+  .sev-med { background:#f5d6a8; color:#5a3406; } .sev-low { background:#e4e7ec; color:#5c6577; } .sev-ok { background:#27500A; color:#fff; }
+  .audit .item { margin: 10px 0 0; padding-top:10px; border-top:1px dashed #e8d2d2; }
+  .audit.ok .item { border-top-color:#d6e6c6; } .audit.warn .item { border-top-color:#ecd7a5; }
+  .audit .item.first { border-top:none; padding-top:0; }
+  .audit .q { font-weight:700; font-size:12.5px; color:#1a1d24; }
+  .audit .layer { font-size:12.5px; margin-top:4px; line-height:1.5; color:#2a2d34; }
+  .lk { font-family:"SF Mono","Courier New",monospace; font-size:10px; font-weight:700; padding:1px 5px; border-radius:4px; margin-right:4px; }
+  .lk-doc { background:#eceef2; color:#5c6577; } .lk-built { background:#f5e0e0; color:#A32D2D; } .lk-best { background:#e3efd4; color:#27500A; }
+  .audit-banner { border:2px solid #A32D2D; background:#fcf5f4; border-radius:10px; padding:18px 20px; margin-bottom:14px; }
+  .audit-banner h3 { font-size:15px; color:#A32D2D; margin-bottom:8px; }
+  .audit-banner p { font-size:12.5px; color:#3a2a2a; margin:7px 0; line-height:1.55; }
+  table.gap { margin-left:38px; width:calc(100% - 38px); }
+  table.gap td { font-size:12px; } table.gap .vd { font-family:"SF Mono","Courier New",monospace; font-size:10px; font-weight:700; white-space:nowrap; }
+  .legend { margin:6px 0 0 38px; font-size:11.5px; color:var(--muted); }
 </style>
 </head>
 <body>
@@ -86,6 +109,30 @@
     <h1>Lead → Conversion → Google Ads: how it should work</h1>
     <div class="sub">The agreed flow in plain terms, the exact HCP/Google Ads fields behind each step, and the open decisions still to make.</div>
     <div class="meta">Account 5797800849 · MCC 6983048345 · validated against 5,262 option rows / 7,831-estimate export · DRAFT v0.1</div>
+  </div>
+
+  <!-- ===================== AUDIT BANNER ===================== -->
+  <div class="sec" style="margin-top:18px;">
+    <div class="audit-banner">
+      <h3>⚠ Implementation Audit &amp; Best-Practice Review — added 2026-06-02</h3>
+      <p>This document has been annotated against (a) the <strong>live</strong> Onyx pipeline — Supabase functions/views queried directly on 2026-06-02, the <code>horizon-dashboard</code> frontend, and the OpenSpec specs — and (b) current <strong>Google Ads offline-conversion best practice</strong>. All original content is preserved. Every audit note sits in a coloured callout box and carries three layers:</p>
+      <p style="margin-left:6px;"><span class="lk lk-doc">DOC</span> what this working doc claims &nbsp;·&nbsp; <span class="lk lk-built">BUILT</span> what the code actually does (verified) &nbsp;·&nbsp; <span class="lk lk-best">BEST</span> what is actually correct — which sometimes sides with the doc, sometimes with the code, and sometimes with neither.</p>
+      <p style="font-size:12px;color:#8a3a3a;border-top:1px solid #e8d2d2;padding-top:8px;"><strong>Headline finding:</strong> the doc describes a <em>per-option, snapshot-on-first-observation</em> detection model that <strong>does not exist anywhere in the system</strong>. The live pipeline detects at the <em>estimate</em> level via three SQL functions (<code>get_pending_{booking,qualified,converted}_lead_conversions</code>) and freezes <code>created_at</code> / <code>updated_at</code> <em>once</em> at discovery (<code>ON CONFLICT DO NOTHING</code>). There is no <code>booked_at</code>, no <code>observed_at</code>, no snapshot/event table, no sent/approved-snapshot, and no scheduled+assigned check. Several doc claims are wrong about both the code <em>and</em> the underlying data; a few doc instincts are actually <em>better</em> than the code; and the code carries best-practice gaps the doc never raises.</p>
+    </div>
+    <div class="legend"><strong>Verdict legend:</strong> <span class="sev sev-crit">CRITICAL</span> doc model absent / materially misleads &nbsp; <span class="sev sev-high">HIGH</span> real divergence to fix &nbsp; <span class="sev sev-med">MED</span> partial / imprecise &nbsp; <span class="sev sev-low">LOW</span> minor &nbsp; <span class="sev sev-ok">OK</span> doc is correct</div>
+    <table class="gap" style="margin-top:12px;">
+      <thead><tr><th style="width:20%">Area</th><th style="width:30%">Doc says</th><th style="width:34%">Live system (verified 2026-06-02)</th><th style="width:16%">Verdict</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Booking detect</strong></td><td>status=scheduled + tech assigned; timestamp = first-observed snapshot <code>booked_at</code></td><td>Fires on <em>any lead source</em> (booking-form OR booking_tags OR CallRail); timestamp = <code>created_at</code>. No scheduling/assignment/snapshot.</td><td class="vd"><span class="sev sev-crit">CRITICAL</span></td></tr>
+        <tr><td><strong>Qualified detect</strong></td><td>option-status set incl. "created job from estimate"; 6-step sent→approved→completed→started anchor chain; $250</td><td>Gate = <code>work_status∈{complete rated,unrated}</code> + a priced option; timestamp = <code>updated_at</code>; value = <code>AVG(all options)/100</code>. No chain, no snapshots.</td><td class="vd"><span class="sev sev-crit">CRITICAL</span></td></tr>
+        <tr><td><strong>Converted detect</strong></td><td>approved <strong>AND a linked Job</strong>; anchor = <code>job.created_at</code> (immutable); value = one option</td><td>Gate = approved option only (<strong>no Job</strong>); timestamp = <code>MAX(approved option.updated_at)</code> (mutable); value = <code>SUM(approved options)/100</code>.</td><td class="vd"><span class="sev sev-high">HIGH</span></td></tr>
+        <tr><td><strong>"2,102 vs 358 Job IDs"</strong></td><td>requiring a Job ID winnows 2,102 → 358</td><td>3,198 of 3,336 approved estimates already have a linked job — a Job gate would drop only ~138. Figure doesn't reproduce.</td><td class="vd"><span class="sev sev-high">HIGH</span></td></tr>
+        <tr><td><strong>Missing GCLID</strong></td><td>"Missing GCLID = can't upload"</td><td>Falls back to <strong>Enhanced Conversions</strong> (hashed email/phone); only skipped if no GCLID <em>and</em> no contact data. This is Google's own recommendation.</td><td class="vd"><span class="sev sev-high">HIGH</span></td></tr>
+        <tr><td><strong>Biddability</strong></td><td>Booking &amp; Qualified <code>include_in_conversions:false</code>; bid on Converted only</td><td>Confirmed correct against live Google config (Converted is the sole <code>primary_for_goal</code> / counted action).</td><td class="vd"><span class="sev sev-ok">OK</span></td></tr>
+        <tr><td><strong>Per-row upload audit</strong></td><td>store success/error per row; surface partial-failures</td><td>Fully built: lifecycle state machine + error dispositions + raw batch request/response + Needs-Attention inbox.</td><td class="vd"><span class="sev sev-ok">OK</span></td></tr>
+        <tr><td><strong>Monitoring (5 checks)</strong></td><td>5 per-estimate "should-exist-but-missing" checks</td><td>Only "upload error/rejected" exists; the other 4 presume the non-existent snapshot/event model. ~10k conversions silently <em>expired</em> unsent — an unlisted 6th failure mode.</td><td class="vd"><span class="sev sev-high">HIGH</span></td></tr>
+      </tbody>
+    </table>
   </div>
 
   <!-- STEP OVERVIEW -->
@@ -135,6 +182,78 @@
     <p class="sec-note" style="margin-top:12px;"><strong>Confirmed field paths</strong> (live payload): estimate root <code>id</code> = <code>csr_…</code>; <code>work_status</code>; <code>schedule.scheduled_start</code> / <code>scheduled_end</code> (= future appointment slot, <span class="flag">not</span> a conversion time); <code>work_timestamps.{on_my_way_at, started_at, completed_at}</code>; <code>lead_source</code>. Per option in <code>options[]</code>: <code>id</code> = <code>est_…</code>, <code>status</code>, <code>approval_status</code>, <code>total_amount</code> (cents), <code>created_at</code>, <code>updated_at</code>. Dates are ISO-8601 UTC (<code>…Z</code>) — store UTC, report in ET. <strong>Rule (validated against live API):</strong> a conversion's timestamp is <em>when the status transition is first observed</em> (snapshot), never <code>scheduled_start</code>, and not <code>created_at</code> when it differs from <code>updated_at</code> — <code>created_at</code> is the estimate's birth and can predate the booking by minutes to hours.</p>
   </div>
 
+  <!-- ===================== AUDIT: STEP 1+2 ===================== -->
+  <div class="sec">
+    <div class="sec-head"><span class="sec-num" style="background:#A32D2D;color:#fff">A</span><h2>Audit — Catch the events &amp; freeze the timestamp</h2></div>
+
+    <!-- BOOKING -->
+    <div class="audit">
+      <div class="audit-h"><span class="pill p-book">BOOKING_CONFIRMED</span> Detection model not built <span class="sev sev-crit">CRITICAL</span></div>
+      <div class="item first">
+        <div class="q">Gate — "options[].status = scheduled AND assigned_employees[] non-empty"</div>
+        <div class="layer"><span class="lk lk-doc">DOC</span> fires on dispatch-board state: scheduled + a tech assigned.</div>
+        <div class="layer"><span class="lk lk-built">BUILT</span> <code>get_pending_booking_lead_conversions()</code> fires whenever <em>any lead-source signal</em> exists on the estimate: <code>is_booking_form = true</code> <strong>OR</strong> a <code>booking_tags</code> row <strong>OR</strong> a <code>callrail_leads</code> match. It never reads option status or assignments. So the action really measures <strong>"an attributed lead exists,"</strong> not "booking confirmed." (Schedule &amp; assignment data <em>is</em> imported — into <code>schedules</code> / <code>estimate_assignments</code> — but detection ignores it.)</div>
+        <div class="layer"><span class="lk lk-best">BEST</span> Pick the semantic deliberately and name the action to match. This action is observation-only, so a bespoke status-snapshot tracker is <em>over-engineering</em>. If "booking" must mean scheduled+assigned, gate on the already-imported <code>schedules</code>/<code>estimate_assignments</code> tables. If it means "attributed lead," rename it and stop calling it BOOKING_CONFIRMED.</div>
+      </div>
+      <div class="item">
+        <div class="q">Timestamp — <code>booked_at</code> = first-observed scheduled+assigned snapshot; <code>created_at</code> only as a fallback when <code>created_at == updated_at</code></div>
+        <div class="layer"><span class="lk lk-built">BUILT</span> timestamp is <code>estimates.created_at</code>, <strong>unconditionally</strong> — no snapshot, no <code>booked_at</code>/<code>observed_at</code> column exists anywhere in the schema, and there is no <code>created_at==updated_at</code> branch. (99.8% of 4,461 booking rows have <code>conversion_datetime == created_at</code>; the 8 exceptions differ by ~2–3s, a timestamptz-precision artifact.)</div>
+        <div class="layer"><span class="lk lk-best">BEST</span> For an upper-funnel, non-biddable signal, <code>created_at</code> is actually a <em>fine, immutable</em> anchor — the estimate is born at lead intake, and a few hours' skew is immaterial within a 90-day window. The doc's fear of <code>created_at</code> and its elaborate snapshot machinery are unnecessary here. <strong>Keep <code>created_at</code>; delete the snapshot design.</strong></div>
+      </div>
+      <div class="item">
+        <div class="q">"Still to validate: that <code>updated_at</code> moves when status → scheduled"</div>
+        <div class="layer"><span class="lk lk-built">BUILT</span> irrelevant to booking — the function never references <code>updated_at</code>. (<code>updated_at</code> is the <em>qualified</em>-stage anchor, not booking.) The honest disclaimer "the how-we-catch-it logic is the proposed concept" is the row's one accurate line — but it's buried while the rest reads as fact.</div>
+      </div>
+    </div>
+
+    <!-- QUALIFIED -->
+    <div class="audit">
+      <div class="audit-h"><span class="pill p-qual">Qualified leads</span> Gate + anchor chain diverge <span class="sev sev-crit">CRITICAL</span></div>
+      <div class="item first">
+        <div class="q">Gate — option statuses {complete rated, complete unrated, created job from estimate} OR approved on-site</div>
+        <div class="layer"><span class="lk lk-built">BUILT</span> gate is <code>estimates.work_status IN ('complete rated','complete unrated')</code> (estimate-level, not per-option) <strong>AND</strong> at least one <code>estimate_options</code> row with <code>total_amount &gt; 0</code>. "created job from estimate" is <strong>not</strong> in the gate (it's a separate <code>work_status</code>, ~2,069 rows); there is no "approved on-site" branch. <em>Note:</em> a repo migration (<code>20260526000001</code>) rewrites this gate to <code>approval_status</code> and is recorded as applied, yet the <strong>live function still runs the <code>work_status</code> gate</strong> — recorded-but-not-effective drift worth resolving.</div>
+        <div class="layer"><span class="lk lk-best">BEST</span> "Qualified = a real estimate was presented to a visited customer" is best keyed to the <em>visit</em>, i.e. <code>work_status</code> complete + a priced option (close to what's built). The per-option status list in the doc conflates <code>estimates.work_status</code> with the unused <code>estimate_options.status</code> column — drop it.</div>
+      </div>
+      <div class="item">
+        <div class="q">Anchor — 6-step chain: sent-snapshot → approved-snapshot → completed_at → started_at → on_my_way_at → created_at</div>
+        <div class="layer"><span class="lk lk-built">BUILT</span> anchor is <code>estimates.updated_at</code>, full stop. The top two "snapshot" anchors <strong>do not exist</strong> (no status-transition tracker, no <code>sent_at</code>/<code>approved_at</code>; "submitted for signoff" is a current option-status value but its transition time is never captured). <code>completed_at</code>/<code>started_at</code>/<code>on_my_way_at</code> live in <code>work_timestamps</code> and are imported but never read by this function.</div>
+        <div class="layer"><span class="lk lk-best">BEST</span> The doc's <em>instinct</em> is right and the code is the weakest option here: <code>updated_at</code> is mutable and moves on <em>any</em> re-sync, so it's a poor proxy for "when the estimate was presented." Use <code>work_timestamps.completed_at</code> (immutable, the actual visit end) as the anchor, falling back to <code>started_at</code>, then <code>created_at</code>. Skip the non-existent sent/approved snapshots entirely.</div>
+      </div>
+      <div class="item">
+        <div class="q">Value — "$250 default"; GCLID — (not described in this row)</div>
+        <div class="layer"><span class="lk lk-built">BUILT</span> value sent = <code>AVG(all estimate_options.total_amount)/100</code> — the mean of <em>every</em> priced option (incl. unapproved), not a flat $250 (all 5,056 stored qualified rows carry a real value, avg ~$3,047). $250, if it exists, is a Google-side action default we always override. GCLID = <code>customer_gclids</code> first-touch within 90 days before <code>updated_at</code> (customer-level, not the per-call/per-form match the doc's Step 3 implies).</div>
+        <div class="layer"><span class="lk lk-best">BEST</span> Qualified is observation-only, so value barely matters — but "AVG of all options incl. unapproved" is a meaningless figure. If you send a value, send the <em>presented</em> value (sum/avg of the options actually quoted). And note: sending a value on a non-biddable action has no optimization effect.</div>
+      </div>
+    </div>
+
+    <!-- CONVERTED -->
+    <div class="audit">
+      <div class="audit-h"><span class="pill p-conv">Converted leads</span> Job gate absent; value &amp; anchor differ <span class="sev sev-high">HIGH</span></div>
+      <div class="item first">
+        <div class="q">Gate — approved/pro-approved <strong>AND a linked Job exists</strong>; "confirm a real Job ID (2,102 rows vs 358)"</div>
+        <div class="layer"><span class="lk lk-built">BUILT</span> gate is <em>only</em> <code>EXISTS</code> an <code>estimate_options</code> row with <code>approval_status IN ('approved','pro approved')</code>. There is <strong>no Job requirement</strong> — the function never touches the <code>jobs</code> table and returns <code>job_id = NULL</code>.</div>
+        <div class="layer"><span class="lk lk-best">BEST</span> The doc's "2,102 vs 358" is <strong>factually wrong</strong>: 3,198 of 3,336 approved estimates already have a linked job (via <code>jobs.original_estimate_id → estimate_option.id → estimate</code>), so a Job gate would drop only ~138, not winnow 6×. A linked Job adds little precision here. <em>If</em> you want the strongest "sale" signal, gate on the job and read its real revenue — but don't justify it with the cited figures.</div>
+      </div>
+      <div class="item">
+        <div class="q">Anchor — <code>job.created_at</code> (immutable)</div>
+        <div class="layer"><span class="lk lk-built">BUILT</span> anchor = <code>MAX(approved option.updated_at)</code> — a <strong>mutable</strong> field that moves on re-sync — even though <code>jobs.created_at</code> is captured in the schema and is unused.</div>
+        <div class="layer"><span class="lk lk-best">BEST</span> Here the doc is <em>right</em>: an immutable sale time (<code>job.created_at</code>, or the first approval observation) is a better, more stable conversion time than "last time the option row was touched." Switch the anchor to <code>job.created_at</code> with a fallback to the approval time.</div>
+      </div>
+      <div class="item">
+        <div class="q">Value — "options[].total_amount ÷ 100" (a single option)</div>
+        <div class="layer"><span class="lk lk-built">BUILT</span> value = <code>SUM(approved options.total_amount)/100</code> across all approved options (150 estimates have &gt;1 approved option; 149 of them differ from the single-option figure — avg SUM $6,580 vs single $4,563).</div>
+        <div class="layer"><span class="lk lk-best">BEST</span> Here the <em>code</em> is more correct: a sale's value is total committed revenue, so SUM (or, better, the linked <code>job.total_amount</code> already surfaced in <code>vw_conversion_candidates</code>) beats one option. The doc's singular phrasing understates revenue — fix the doc, keep SUM (or move to job total).</div>
+      </div>
+    </div>
+
+    <div class="audit warn">
+      <div class="audit-h">"Confirmed field paths" paragraph <span class="sev sev-low">LOW</span></div>
+      <div class="item first">
+        <div class="layer"><span class="lk lk-best">BEST</span> The raw field/ID inventory is <em>accurate</em> (estimate ids <code>csr_*</code>, option ids <code>est_*</code>; <code>schedules.scheduled_start</code>, <code>work_timestamps.*</code>, <code>estimate_options.{status,approval_status,total_amount}</code> all exist). The defect is that the doc <em>wires detection</em> to <code>scheduled_start</code>, <code>work_timestamps.*</code> and option-status — fields the live <code>get_pending_*</code> functions never read. Add a line clarifying which fields detection actually consults (<code>work_status</code>, <code>approval_status</code>, <code>total_amount</code>, <code>created_at</code>/<code>updated_at</code>) vs which are reporting-only, so nobody builds against unused fields. Also: external-export counts ("5,262 option rows", "7,761 estimates") no longer reconcile with the live DB (11,097 option rows) — tag them with source &amp; date.</div>
+      </div>
+    </div>
+  </div>
+
   <!-- STEP 3 -->
   <div class="sec">
     <div class="sec-head"><span class="sec-num">2</span><h2>Link each conversion to its lead source</h2></div>
@@ -145,6 +264,29 @@
       <div class="src"><span class="rank">3</span><div class="body"><span class="st">Google Local Services (LSA)</span><span class="tag tag-gap">GAP</span><div class="sd">Tracked only via CallRail today. Plan: integrate Google LSA directly for proper lead-level attribution.</div></div></div>
       <div class="src"><span class="rank">4</span><div class="body"><span class="st">Referral / organic</span><span class="tag tag-gap">GAP</span><div class="sd">No click to attribute. Need a tagging method (intake question, HCP lead-source field) so they're excluded cleanly, not misattributed.</div></div></div>
       <div class="src"><span class="rank">5</span><div class="body"><span class="st">Recurring / repeat customers</span><span class="tag tag-plan">PARTIAL</span><div class="sd">Return customers shouldn't count as new paid conversions. Detect repeat customer → suppress or send at $1 (as Repeat Phone Call already does).</div></div></div>
+    </div>
+  </div>
+
+  <!-- ===================== AUDIT: STEP 3 ===================== -->
+  <div class="sec">
+    <div class="sec-head"><span class="sec-num" style="background:#A32D2D;color:#fff">A</span><h2>Audit — Link each conversion to its lead source</h2></div>
+    <div class="audit warn">
+      <div class="audit-h">The 5 sources — directionally right, taxonomy differs <span class="sev sev-med">MED</span></div>
+      <div class="item first">
+        <div class="q">How attribution actually resolves (not described in the doc)</div>
+        <div class="layer"><span class="lk lk-built">BUILT</span> A SQL pre-pass populates <code>customer_gclids</code> from booking-form tags and CallRail (joined by <code>customer_id</code>). <code>booking_lead</code> takes its GCLID per-estimate (booking_tags first, else newest CallRail call). <code>qualified</code>/<code>converted</code> take the <strong>oldest</strong> <code>customer_gclids</code> entry within 90 days of the conversion time. Channel is resolved entirely in SQL (<code>vw_conversion_candidates</code>) into 7 values — Google Ads / GLS / GMB / Thumbtack / Organic / Direct / Other — and the frontend just trusts it.</div>
+        <div class="layer"><span class="lk lk-best">BEST</span> Most-correct attribution credits the GCLID from the <em>same interaction that generated this lead</em> (the call/form that created the estimate) — which the system already does for <code>booking</code>. For qualified/converted it falls back to a customer-level click, which can over-credit an unrelated old click. Prefer per-lead attribution; use customer-level only as a fallback.</div>
+      </div>
+      <div class="item">
+        <div class="q">#1 CallRail [HAVE] &nbsp; #2 Online booking [PARTIAL] &nbsp; #3 LSA [GAP] &nbsp; #4 Referral/organic [GAP] &nbsp; #5 Recurring [PARTIAL]</div>
+        <div class="layer"><span class="lk lk-built">BUILT</span> <strong>CallRail</strong> ✓ (now matched phone→<em>customer</em>, broader than phone→estimate). <strong>Online booking</strong> — GCLID capture into <code>booking_tags</code> is <em>already live</em> and is the top-priority signal; only GA4/GTM coverage is partial, so the doc understates it. <strong>LSA</strong> ✓ GAP — detected only via CallRail source strings ("Google Local Services Ads", 612 rows, only 9 with a GCLID → essentially enhanced-conversion-only); no direct LSA API. <strong>Referral/organic</strong> — actually <em>classified</em> (Organic/Direct branches), so not misattributed to paid, but there is <strong>no upload-exclusion</strong> keyed on channel and no intake-question tagging. <strong>Recurring</strong> — <span style="color:#A32D2D;font-weight:700">no suppression and no "$1 send" exists anywhere</span>; the parenthetical "(as Repeat Phone Call already does)" refers to an external Google/CallRail convention, not this system. <code>customer_gclids</code> in fact does the <em>opposite</em> — it lets repeats inherit the original click.</div>
+        <div class="layer"><span class="lk lk-best">BEST</span> Keep the channel taxonomy as the single source of truth. To "exclude cleanly" (the doc's goal), add a channel-keyed upload-exclusion gate (Organic/Direct/repeat → skip or upload at low value) — today nothing enforces it. Map the doc's 5 sources onto the real 7-value taxonomy + <code>customer_gclids</code> so it's searchable.</div>
+      </div>
+      <div class="item">
+        <div class="q">Studied edge cases (the "side notes") — current state</div>
+        <div class="layer"><span class="lk lk-built">BUILT</span> ✓ <strong>90-day click window</strong> (the "tightened attribution window", 2026-05-13) is live and matches Google's 90-day lookback. ✓ <strong>CallRail-by-customer_id pre-pass</strong> (2026-05-22) recovered hundreds of leads whose <code>estimate_id</code> was NULL at trigger time. ✓ <strong>"Call forwarding" → Direct</strong> (2026-05-25) is live. <span style="color:#A32D2D;font-weight:700">✗</span> <strong>Oldest-vs-newest GCLID:</strong> resolver picks <em>oldest</em>-in-window (first-touch); the active <code>conversion-attribution-overhaul</code> argues for <em>newest</em>-in-window — not yet built. <span style="color:#A32D2D;font-weight:700">✗</span> <strong>"NULL is sticky":</strong> once a pending row is inserted with <code>gclid = NULL</code> it is never re-resolved even if a usable GCLID arrives later (<code>NOT EXISTS</code> gate) — a real coverage defect; the re-attribution pass is proposed, not built.</div>
+        <div class="layer"><span class="lk lk-best">BEST</span> The NULL-sticky problem is the one to fix first — it permanently loses attributable conversions. Add a re-resolution UPDATE pass for pending/NULL rows within the window. The first-touch vs last-touch choice is a genuine policy decision (last-click is Google's historical default; first-touch better reflects acquisition) — make it explicitly.</div>
+      </div>
     </div>
   </div>
 
@@ -164,6 +306,42 @@
     </table>
   </div>
 
+  <!-- ===================== AUDIT: STEP 4 ===================== -->
+  <div class="sec">
+    <div class="sec-head"><span class="sec-num" style="background:#27500A;color:#fff">A</span><h2>Audit — Send to Google Ads &amp; confirm acceptance</h2></div>
+    <div class="audit ok">
+      <div class="audit-h">Mostly correct — and mostly already built <span class="sev sev-ok">OK</span></div>
+      <div class="item first">
+        <div class="q">"Store success/error per row. Surface partial-failure errors instead of swallowing them."</div>
+        <div class="layer"><span class="lk lk-best">BEST</span> ✓ This — the doc's strongest requirement — is <strong>fully implemented and is best practice</strong>. The uploader sends <code>partialFailure: true</code>, parses <code>partialFailureError</code> per row, and persists per-row <code>error_code</code>/<code>error_namespace</code>/<code>error_detail</code> plus a richer 8-state <code>lifecycle</code>; raw request/response bodies are stored per batch; an automatic pipeline-pause trips on fix-config errors. Step 4/5 are largely "done," not "to build."</div>
+      </div>
+    </div>
+    <div class="audit">
+      <div class="audit-h">Three concrete corrections <span class="sev sev-high">HIGH</span></div>
+      <div class="item first">
+        <div class="q">"Missing GCLID = can't upload"</div>
+        <div class="layer"><span class="lk lk-built">BUILT</span> false — a row with no GCLID uploads via <strong>Enhanced Conversions</strong> (hashed email/phone); it's skipped (status <code>skipped</code>, lifecycle <code>excluded</code> — a deliberate non-failure) only when there's no GCLID <em>and</em> no contact identifier.</div>
+        <div class="layer"><span class="lk lk-best">BEST</span> The code is right and the doc is outdated: Google explicitly recommends sending user-provided data even without a GCLID ("conversions with only user-provided data are still useful"), and sending the GCLID <em>in addition to</em> identifiers when present. <strong>Rewrite this line.</strong></div>
+      </div>
+      <div class="item">
+        <div class="q">"<code>conversion_date_time</code> must be in account timezone"</div>
+        <div class="layer"><span class="lk lk-built">BUILT</span> always emitted in <strong>UTC</strong> with a literal <code>+00:00</code> offset, never account time (America/New_York).</div>
+        <div class="layer"><span class="lk lk-best">BEST</span> An explicit UTC offset is <em>accepted</em> by Google, so it's functionally fine — but Google <em>recommends</em> sending in the account timezone so UI conversion counts and time-of-day reporting reconcile. Switch to account-TZ formatting; it's a one-line fix in <code>hashing.ts</code>.</div>
+      </div>
+      <div class="item">
+        <div class="q">90-day window — uniform expiry vs the 63-day enhanced-conversion limit <span class="sev sev-high">HIGH</span></div>
+        <div class="layer"><span class="lk lk-built">BUILT</span> <code>pickup.ts</code> expires every queued row whose <code>conversion_datetime</code> is older than <strong>90</strong> days. On the live DB this is the dominant outcome — <strong>~10,309 rows are <code>expired</code></strong> (aged out before upload) vs only ~2,509 sent.</div>
+        <div class="layer"><span class="lk lk-best">BEST</span> Two issues. (1) Google's window for <strong>Enhanced Conversions for Leads is 63 days, not 90</strong> — so GCLID-less rows uploaded at 63–90 days are silently rejected by Google. Expiry should be 63 days for user-data-only rows, 90 for GCLID rows. (2) A 10k-deep expired backlog means the real bottleneck is <em>upload latency / discovery cadence</em>, not the window — fix the throughput (and the stale cron, see Decisions audit) so conversions are sent well inside the window.</div>
+      </div>
+    </div>
+    <div class="audit warn">
+      <div class="audit-h">Value &amp; data-flow precisions <span class="sev sev-low">LOW</span></div>
+      <div class="item first">
+        <div class="layer"><span class="lk lk-best">BEST</span> The "$250 default" belongs to Google's <em>Qualified</em> action, not Converted — and we always override it (we send a computed value for both qualified and converted; booking sends none). Currency is hard-coded <code>USD</code>, so "verify currency" is moot. Data-flow nuance to add: the <code>get_pending_*</code> functions are the <em>discovery</em> step — they freeze rows into <code>gads_conversion_uploads</code> as <code>queued</code>; the upload function drains that queue and never re-runs detection SQL or reads <code>vw_conversion_candidates</code>.</div>
+      </div>
+    </div>
+  </div>
+
   <!-- STEP 5 -->
   <div class="sec">
     <div class="sec-head"><span class="sec-num">4</span><h2>Monitor for missing conversions</h2></div>
@@ -178,6 +356,32 @@
         <tr><td>Stale snapshot</td><td>Status advanced in HCP but no event row was written → sync gap.</td></tr>
       </tbody>
     </table>
+  </div>
+
+  <!-- ===================== AUDIT: STEP 5 ===================== -->
+  <div class="sec">
+    <div class="sec-head"><span class="sec-num" style="background:#A32D2D;color:#fff">A</span><h2>Audit — Monitor for missing conversions</h2></div>
+    <div class="audit">
+      <div class="audit-h">4 of the 5 checks presume a model that doesn't exist <span class="sev sev-high">HIGH</span></div>
+      <div class="item first">
+        <div class="q">✓ "Upload error / rejected" — the one real check</div>
+        <div class="layer"><span class="lk lk-built">BUILT</span> the <strong>Needs-Attention inbox</strong> reads <code>vw_gads_conversion_uploads</code> where <code>lifecycle = 'needs-attention'</code>, grouped by <code>error_code</code> and joined to <code>gads_error_dispositions</code>. Caveat: it's disposition-filtered — retryable errors auto-retry, benign ones (<code>CLICK_NOT_FOUND</code>, <code>EXPIRED_EVENT</code>, duplicates) are muted by design — so "needs re-send or fix" overstates what reaches a human.</div>
+      </div>
+      <div class="item">
+        <div class="q">✗ "Qualified but never Scheduled" &amp; "Stale snapshot"</div>
+        <div class="layer"><span class="lk lk-built">BUILT</span> <strong>impossible as worded</strong> — both reference a "booked snapshot" / "event row" / status-transition log that does not exist. The pipeline derives conversions on demand from current columns; it writes no per-transition event rows.</div>
+        <div class="layer"><span class="lk lk-best">BEST</span> Don't build an event-sourced status log just to support these. Re-specify them against real data, or drop them.</div>
+      </div>
+      <div class="item">
+        <div class="q">✗ "Scheduled but no source" &amp; "Converted but not uploaded"</div>
+        <div class="layer"><span class="lk lk-built">BUILT</span> not implemented as monitors. Worse, an unattributed booking is silently marked <code>excluded</code> (not surfaced), and "Converted" detection isn't keyed on a Job at all — so "Job exists with GCLID but no upload" mis-describes the trigger. The closest real surfaces are <em>aggregate</em> reconciliation views (<code>vw_gads_upload_reconciliation_daily</code>, <code>vw_gads_attribution_summary</code>), which compare local-vs-Google counts but can't point at a specific missing conversion.</div>
+        <div class="layer"><span class="lk lk-best">BEST</span> These two <em>are</em> buildable on existing data (<code>vw_conversion_candidates</code> already exposes source + GCLID + upload status per estimate) — and they're worth building. But the single highest-value monitor is one the doc omits entirely:</div>
+      </div>
+      <div class="item">
+        <div class="q">⚠ The missing 6th check — conversions expiring unsent</div>
+        <div class="layer"><span class="lk lk-best">BEST</span> ~10,309 rows currently sit in <code>expired</code> — conversions that <em>should</em> have uploaded but aged past the window before being sent. Nothing flags them. The needs-attention inbox is presently <strong>empty</strong> while 10k conversions quietly time out. This — not the snapshot-based checks — is the real "safety net" to build first.</div>
+      </div>
+    </div>
   </div>
 
   <!-- DECISIONS -->
@@ -200,6 +404,57 @@
       <div class="dec-item">
         <div class="dec-q">4. Counting type — leave Qualified/Converted as MANY_PER_CLICK, or tighten to ONE_PER_CLICK?</div>
         <div class="dec-o">Many-per-click can inflate when one customer spawns several estimates/jobs. ☐ Keep many ☐ One-per-click</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== AUDIT: DECISIONS ===================== -->
+  <div class="sec">
+    <div class="sec-head"><span class="sec-num" style="background:#27500A;color:#fff">A</span><h2>Audit — Decisions to make</h2></div>
+    <div class="audit ok">
+      <div class="audit-h">The config claims check out (vs live Google snapshot) <span class="sev sev-ok">OK</span></div>
+      <div class="item first">
+        <div class="q">#1 "Today both [Scheduled &amp; Qualified] are include_in_conversions: false; bid on Converted"</div>
+        <div class="layer"><span class="lk lk-best">BEST</span> ✓ confirmed against the live <code>gads_action_config_snapshots</code>: BOOKING_CONFIRMED and Qualified are both <code>include_in_conversions_metric = false</code>; Converted is the only action with <code>include_in_conversions_metric = true</code> and <code>primary_for_goal = true</code>. Keeping the upper funnel observation-only and bidding on Converted is sound. (Note these are <em>Google-owned</em> settings — the app's config UI can't change them; "make biddable" means a change in Google Ads, not in Onyx.)</div>
+      </div>
+      <div class="item">
+        <div class="q">#4 "leave Qualified/Converted as MANY_PER_CLICK, or tighten to ONE_PER_CLICK?"</div>
+        <div class="layer"><span class="lk lk-best">BEST</span> ✓ premise confirmed — both are <code>MANY_PER_CLICK</code> live (and BOOKING_CONFIRMED is already <code>ONE_PER_CLICK</code>, which the doc omits). Google's own guidance for lead-gen is that <strong>ONE_PER_CLICK is usually right</strong> when you care whether a <em>kind of lead</em> happened, not how many. <strong>Lean: tighten Qualified to ONE_PER_CLICK.</strong> For Converted it depends on intent: ONE_PER_CLICK if a click should count one sale-lead; MANY_PER_CLICK + value if you value-bid on total revenue across multiple jobs from one click. This interacts with the SUM-across-options value (Step 1 audit) — MANY_PER_CLICK + SUM can compound inflation.</div>
+      </div>
+    </div>
+    <div class="audit">
+      <div class="audit-h">#2 LSA &amp; #3 Recurring/referral — genuinely open, nothing built <span class="sev sev-med">MED</span></div>
+      <div class="item first">
+        <div class="layer"><span class="lk lk-best">BEST</span> Both are correctly framed as open. <strong>#2 LSA:</strong> today LSA is CallRail-string-detected and almost never carries a GCLID (9/612 rows) → it uploads enhanced-conversion-only and under-counts; a direct LSA integration is the right fix if LSA volume justifies it. <strong>#3 Recurring/referral:</strong> there is currently <em>no</em> suppression, no $1-send, and no channel-keyed exclusion at the upload layer — any of the three options requires new code. The "$1 like Repeat Phone Call" precedent is not a behavior this system has.</div>
+      </div>
+    </div>
+    <div class="audit warn">
+      <div class="audit-h">⚠ Operational finding the doc can't see — config snapshot is stale <span class="sev sev-high">HIGH</span></div>
+      <div class="item first">
+        <div class="layer"><span class="lk lk-best">BEST</span> Every "today" config claim above rests on a snapshot whose latest <code>synced_at</code> is <strong>2026-05-20 — 13 days stale</strong>. The daily <code>gads-upload-analytics-sync</code> cron is <code>active</code>, yet every recorded run is <code>trigger = 'manual'</code> — the scheduled job isn't firing (consistent with the known <em>cron → edge-function auth</em> issue: use <code>sb_secret_</code> keys + <code>verify_jwt = false</code>). So Google-side settings could have drifted without the snapshot showing it. Verify the cron actually invokes the function before trusting biddability/counting-type as current.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== AUDIT: BEST-APPROACH + DOC QUALITY ===================== -->
+  <div class="sec">
+    <div class="sec-head"><span class="sec-num" style="background:#A32D2D;color:#fff">A</span><h2>Audit — Best-approach summary &amp; doc quality</h2></div>
+    <div class="audit">
+      <div class="audit-h">What the <em>correct</em> system looks like (independent of this doc and the current code)</div>
+      <div class="item first">
+        <div class="layer"><span class="lk lk-best">BEST</span> <strong>1. Don't build a snapshot/event-sourcing layer.</strong> It's the doc's central premise and it's unnecessary. Use the immutable timestamps HCP already gives you, frozen once at discovery.</div>
+        <div class="layer"><span class="lk lk-best">BEST</span> <strong>2. Anchor each stage to the most meaningful immutable time available:</strong> booking → <code>created_at</code> (fine as-is); qualified → <code>work_timestamps.completed_at</code> (visit end), not <code>updated_at</code>; converted → <code>job.created_at</code> (sale), not <code>MAX(option.updated_at)</code>.</div>
+        <div class="layer"><span class="lk lk-best">BEST</span> <strong>3. Lean into Enhanced Conversions for Leads</strong> (already half-built): always send hashed email/phone, add the GCLID when present, and respect the <strong>63-day</strong> window for user-data-only rows.</div>
+        <div class="layer"><span class="lk lk-best">BEST</span> <strong>4. Fix attribution coverage:</strong> re-resolve NULL-GCLID pending rows within the window (kill "NULL is sticky"); decide first- vs last-touch deliberately; add a channel-keyed exclusion for organic/direct/repeat if you want clean uploads.</div>
+        <div class="layer"><span class="lk lk-best">BEST</span> <strong>5. Monitor the real failure mode:</strong> ~10k conversions are expiring unsent. Surface "approved/booked + attributable but not uploaded/expiring" and fix discovery/upload cadence + the stale analytics cron. These need no new data model.</div>
+        <div class="layer"><span class="lk lk-best">BEST</span> <strong>6. Tighten counting + value semantics:</strong> ONE_PER_CLICK for Qualified; reconcile Converted's MANY_PER_CLICK with its SUM-across-options value; stop sending a meaningless AVG value on a non-biddable Qualified action.</div>
+      </div>
+    </div>
+    <div class="audit warn">
+      <div class="audit-h">Doc quality vs project conventions <span class="sev sev-med">MED</span></div>
+      <div class="item first">
+        <div class="layer"><span class="lk lk-best">BEST</span> As a stakeholder narrative this doc is thoughtful and gets the strategic shape right (3 actions, cents/100, GCLID-first + enhanced fallback, store-the-response, monitor gaps). As a <em>spec</em> it has two systemic defects: (1) it describes a detection model that doesn't exist, and (2) it never uses the canonical names an implementer must search for (<code>booking_lead</code>/<code>qualified_lead</code>/<code>converted_lead</code>, <code>work_status</code>, <code>estimate_options</code>, <code>vw_conversion_candidates</code>, <code>get_pending_*</code>, <code>customer_gclids</code>, <code>discover_pending_conversions</code>). Project specs use testable <code>### Requirement</code> + <code>#### Scenario (WHEN/THEN)</code> form; this is free-form HTML with checkbox decisions.</div>
+        <div class="layer"><span class="lk lk-best">BEST</span> <strong>To make it implementation-ready:</strong> add a "current vs proposed" split (or a banner — done above), add a terminology-mapping table, ground or date every quantitative claim, and convert each row to Requirement/Scenario against the live model. <code>DRAFT v0.1</code> is honest — but until reframed it must <em>not</em> be treated as an implementation contract: several of its central mechanics contradict the deployed pipeline.</div>
       </div>
     </div>
   </div>

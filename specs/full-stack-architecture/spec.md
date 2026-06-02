@@ -459,9 +459,9 @@ After any implementation that changes the behavior of a pipeline stage, this spe
 
 #### Stage 9a: Booking Lead
 
-**In plain terms:** This stage is discovered the moment a lead exists at all — someone submitted the online booking form, called a tracked number that got matched to them, or arrived with any identifiable lead source. It is the "a potential customer asked for service" signal, the earliest point in the funnel. Nothing has been priced yet, so no dollar value is attached.
+**In plain terms:** This stage is discovered the moment a lead exists at all — someone submitted the online booking form, that submission left tracking tags, or they called a tracked number that got matched to them. It is the "a potential customer asked for service" signal, the earliest point in the funnel. Nothing has been priced yet, so no dollar value is attached.
 
-Estimates that carry **none** of these signals — not from the booking form, no tracking tags, no matched call, and no lead source recorded — are deliberately **not** discovered. These are typically estimates entered by hand in HousecallPro (walk-ins, repeat clients, internal records) with no marketing origin to attribute a conversion to. Reporting them to Google Ads would credit it with leads it never drove, inflating conversion counts with traffic it can't optimize against.
+Estimates that carry **none** of these signals — not from the booking form, no tracking tags, and no matched call — are deliberately **not** discovered. These are typically estimates entered by hand in HousecallPro (walk-ins, repeat clients, internal records) with no marketing origin to attribute a conversion to. Reporting them to Google Ads would credit it with leads it never drove, inflating conversion counts with traffic it can't optimize against.
 
 These estimates are still **visible** in the dashboard's conversions pipeline — `vw_conversion_candidates` lists every estimate, not just discovered ones — where they appear as **pre-discovery** rows: all three stages read "Not discovered" and the Booking Lead detail shows "No attribution data detected." Not being discovered means no conversion is uploaded; it does not mean the estimate is hidden from operators.
 

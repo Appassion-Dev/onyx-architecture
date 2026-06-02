@@ -4,14 +4,13 @@ on:
   push:
     branches: [main]
     paths:
-      - 'changes/**'
-      - 'specs/**'
+      - 'reports/**'
   workflow_dispatch:
     inputs:
       files:
-        description: "Space-separated list of files to simulate as changed (e.g. specs/full-stack-architecture/spec.md)"
+        description: "Space-separated list of report files to simulate as changed (e.g. reports/may-18-25-2026-changes-report.md)"
         required: true
-        default: "specs/full-stack-architecture/spec.md"
+        default: "reports/may-18-25-2026-changes-report.md"
 
 permissions:
   contents: read

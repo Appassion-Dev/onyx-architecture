@@ -2,8 +2,9 @@
 """
 openspec_notify.py
 
-Reads the list of changed files from a git diff, categorizes them by
-openspec path pattern, generates an AI summary, and posts to Slack.
+Reads the list of changed files from a git diff, keeps only the changes
+reports (reports/*.md), generates an AI summary of each report, and posts
+to Slack.
 
 AI backend (first key found wins):
   AI_API_KEY    - preferred; any OpenAI-compatible provider
@@ -38,7 +39,7 @@ DEFAULT_AI_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 DEFAULT_AI_MODEL = "openai/gpt-4o"
 
 MAX_FILE_CHARS = 4000   # truncate large files before sending to the model
-MAX_FILES_PER_CALL = 5  # cap to keep prompt size reasonable
+REPORTS_DIR = "reports/"
 
 
 def md_to_mrkdwn(text: str) -> str:
@@ -47,8 +48,8 @@ def md_to_mrkdwn(text: str) -> str:
     text = re.sub(r'\*\*(.*?)\*\*', r'*\1*', text)
     # Markdown list items: lines starting with "* " or "- " → bullet
     text = re.sub(r'^[\*\-]\s+', '• ', text, flags=re.MULTILINE)
-    # Ensure TL;DR: is bolded if not already
-    text = re.sub(r'^(?!\*)TL;DR:', '*TL;DR:*', text, flags=re.MULTILINE)
+    # Ensure Главное: is bolded if not already
+    text = re.sub(r'^(?!\*)Главное:', '*Главное:*', text, flags=re.MULTILINE)
     return text
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -87,7 +88,7 @@ def _call_openai_compatible(messages: list[dict], api_key: str, url: str, model:
         "model": model,
         "messages": messages,
         "temperature": 0.3,
-        "max_tokens": 400,
+        "max_tokens": 900,
     }).encode()
 
     req = urllib.request.Request(
@@ -118,7 +119,7 @@ def _call_github_models(messages: list[dict]) -> str:
         "model": GITHUB_MODEL,
         "messages": messages,
         "temperature": 0.3,
-        "max_tokens": 400,
+        "max_tokens": 900,
     }).encode()
 
     req = urllib.request.Request(
@@ -164,37 +165,22 @@ def post_to_slack(blocks: list[dict]) -> None:
         sys.exit(1)
 
 
-# ── Category detection ────────────────────────────────────────────────────────
+# ── Report detection ──────────────────────────────────────────────────────────
 
-PROPOSAL_DOC_NAMES = {"proposal.md", "design.md", "tasks.md"}
+def find_reports(files: list[str]) -> list[str]:
+    """Keep only changed report files: reports/*.md."""
+    return [f for f in files if f.startswith(REPORTS_DIR) and f.endswith(".md")]
 
 
-def categorize(files: list[str]) -> dict[str, list[str]]:
-    """
-    Returns a dict with keys: 'proposals', 'specs', 'other'.
-    'proposals' = changes/<change>/(proposal|design|tasks).md only.
-                  Excludes changes/<change>/specs/** and changes/archive/**.
-    'specs'     = specs/** (acknowledged only, content not sent to AI).
-    """
-    result: dict[str, list[str]] = {
-        "proposals": [],
-        "specs": [],
-        "other": [],
-    }
-    for f in files:
-        if f.startswith("changes/archive/"):
-            continue
-        if f.startswith("changes/"):
-            parts = f.split("/")
-            # changes/<change>/<file> — exactly 3 segments, and not under .../specs/
-            if len(parts) == 3 and parts[2] in PROPOSAL_DOC_NAMES:
-                result["proposals"].append(f)
-            continue
-        if f.startswith("specs/"):
-            result["specs"].append(f)
-        else:
-            result["other"].append(f)
-    return result
+def report_title(path: str) -> str:
+    """Use the first H1 heading as the title, falling back to the file name."""
+    try:
+        for line in Path(path).read_text(encoding="utf-8", errors="replace").splitlines():
+            if line.startswith("# "):
+                return line[2:].strip()
+    except Exception:
+        pass
+    return Path(path).stem
 
 
 # ── AI summary generation ─────────────────────────────────────────────────────
@@ -206,31 +192,38 @@ You write stakeholder updates in CLEAR, PLAIN LANGUAGE for a mixed audience
 - Common business and product terms are FINE and expected: conversions, platform, dashboard,
   integration, pipeline, campaign, dataset, API, webhook, etc. Don't translate these into analogies.
 - Lead with the conclusion. Talk about OUTCOMES — what changes for the team or the product — not activities.
-- Format: TL;DR first, then 2–4 supporting bullets.
-- Total output under 130 words.
+- Follow the exact section structure the user gives you; keep every section label.
+- Be concise: each bullet is one short line. Total output under 250 words.
 - Use bold (*word*) for key terms. Use bullet points for lists.
 - If there is a risk or blocker, say it first.
 - Write in Russian."""
 
 
-def summarize_proposals(files: list[str]) -> str:
-    contents = "\n\n---\n\n".join(
-        f"File: {f}\n\n{Path(f).read_text(encoding='utf-8', errors='replace')}" for f in files
-    )
+def summarize_report(path: str) -> str:
+    content = Path(path).read_text(encoding="utf-8", errors="replace")
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {
             "role": "user",
             "content": (
-                "A development proposal was updated. It is not finalized — it represents "
-                "a direction being considered. Generate a stakeholder update using this format:\n"
-                "*TL;DR:* [one sentence — the most important thing to know about this proposal]\n"
-                "• [What outcome or goal this proposal serves]\n"
-                "• [Key decision or tradeoff involved, if any]\n"
-                "• [What happens next / what still needs to be decided]\n\n"
-                "Do not describe the file. Focus on the product impact. "
-                "Write your entire response in Russian.\n\n"
-                f"{contents}"
+                "A changes report was published. Summarize it for stakeholders using EXACTLY "
+                "this structure, keeping every section label and order:\n\n"
+                "*Главное:* [one sentence — the single most important thing this report says shipped]\n\n"
+                "*Обзор недели:* [2–3 sentences that summarize the report's "
+                "\"## High-level overview of the week\" section]\n\n"
+                "*База данных:*\n"
+                "• [each notable database change — schema, views, functions, migrations — "
+                "aggregated across the report's \"### Database\" subsections]\n\n"
+                "*Фронтенд:*\n"
+                "• [each notable frontend change, aggregated across the \"### Frontend\" subsections]\n\n"
+                "*Edge-функции:*\n"
+                "• [each notable edge-function change, aggregated across the \"### Edge function\" "
+                "subsections; write \"• — без изменений\" if the report has none]\n\n"
+                "*Темы недели:*\n"
+                "• [each recurring theme from the report's \"## Themes for the week\" section]\n\n"
+                "Aggregate across all changes in the report — do not go change-by-change. "
+                "Focus on product impact, not file names. Write your entire response in Russian.\n\n"
+                f"{content}"
             ),
         },
     ]
@@ -314,31 +307,21 @@ def main(changed_files_path: str) -> None:
         return
 
     all_files = [f.strip() for f in raw.splitlines() if f.strip()]
-    all_files = [f for f in all_files if Path(f).name != ".openspec.yaml"]
-    cats = categorize(all_files)
+    reports = find_reports(all_files)
+
+    if not reports:
+        print("No report changes — skipping notification.")
+        return
 
     sections: list[dict] = []
-
-    if cats["specs"]:
+    for f in reports:
+        summary = summarize_report(f)
         sections.append({
-            "emoji": "📐",
-            "title": "Spec Integrated",
-            "summary": "Спецификация интегрирована — зафиксированы требования, по которым теперь работаем.",
-            "files": cats["specs"],
+            "emoji": "📊",
+            "title": report_title(f),
+            "summary": summary or "_Summary unavailable — see linked file._",
+            "files": [f],
         })
-
-    if cats["proposals"]:
-        summary = summarize_proposals(cats["proposals"])
-        sections.append({
-            "emoji": "💡",
-            "title": "Proposal in Progress",
-            "summary": summary or "_Summary unavailable — see linked files._",
-            "files": cats["proposals"],
-        })
-
-    if not sections:
-        print("No openspec-relevant changes — skipping notification.")
-        return
 
     blocks = build_blocks(sections)
     post_to_slack(blocks)

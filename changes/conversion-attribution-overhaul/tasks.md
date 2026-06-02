@@ -2,7 +2,7 @@
 
 ## 1. Resolver and gate rewrite — implements proposal points #1, #4, #5, #7
 
-- [ ] 1.1 Create migration `supabase/migrations/<timestamp>_qualified_lead_gate_priced_option.sql` that `CREATE OR REPLACE FUNCTION public.get_pending_qualified_lead_conversions()` with: gate = `EXISTS (estimate_options eo WHERE eo.estimate_id = e.id AND eo.total_amount > 0)`, no `work_status` filter, **no GCLID subquery** (`gclid` column returns NULL; the discovery wrapper supplies it), `conversion_value = COALESCE(AVG(eo.total_amount)/100.0, 0)`, `conversion_datetime = e.updated_at`, retain `NOT EXISTS (gads_conversion_uploads ... qualified_lead)` gate, retain GRANT to `service_role`.
+- [ ] 1.1 Create migration `supabase/migrations/<timestamp>_qualified_lead_gate_approved_priced_option.sql` that `CREATE OR REPLACE FUNCTION public.get_pending_qualified_lead_conversions()` with: gate = `EXISTS (estimate_options eo WHERE eo.estimate_id = e.id AND eo.approval_status IN ('approved','pro approved') AND eo.total_amount > 0)`, no `work_status` filter, **no GCLID subquery** (`gclid` column returns NULL; the discovery wrapper supplies it), `conversion_value = COALESCE(SUM(eo.total_amount)/100.0, 0)` summed across `estimate_options` rows for the estimate that satisfy the same approval+priced filter, `conversion_datetime = MAX(eo.updated_at)` across those same rows, retain `NOT EXISTS (gads_conversion_uploads ... qualified_lead)` gate, retain GRANT to `service_role`.
 - [ ] 1.2 Create migration `supabase/migrations/<timestamp>_converted_lead_gate_job_exists.sql` that `CREATE OR REPLACE FUNCTION public.get_pending_converted_lead_conversions()` with: gate = `EXISTS (jobs j WHERE j.original_estimate_id = e.id)`, no `approval_status` filter on options, most-recent job selected via LATERAL `ORDER BY j.created_at DESC LIMIT 1` for `job_id`, `conversion_value = j.total_amount/100.0`, `conversion_datetime = j.updated_at`, **no GCLID subquery** (column returns NULL; wrapper supplies), retain `NOT EXISTS` gate, retain GRANT to `service_role`.
 - [ ] 1.3 Create migration `supabase/migrations/<timestamp>_resolve_estimate_gclid.sql` defining `CREATE OR REPLACE FUNCTION public.resolve_estimate_gclid(p_estimate_id text) RETURNS text` (LANGUAGE sql STABLE SECURITY DEFINER) implementing the DESC newest-in-window resolver anchored on `GREATEST(e.updated_at, MAX(jobs.updated_at))` minus 90 days. Returns NULL when no in-window GCLID exists. GRANT EXECUTE to `service_role`.
 
@@ -46,7 +46,7 @@
 ## 7. Tests — covers all proposal points #1–#7
 
 - [ ] 7.1 Update `supabase/tests/gclid_lookback_window_test.sql` (or add a sibling test file) to cover the new DESC-in-window resolver: customer with multiple in-window GCLIDs returns the newest; customer with stale + fresh returns fresh; customer with only stale returns NULL.
-- [ ] 7.2 Add a pgTAP test covering the new qualified gate: estimate with `work_status = 'created job from estimate'` and a priced option IS discovered as qualified; estimate with no priced option is NOT discovered.
+- [ ] 7.2 Add a pgTAP test covering the new qualified gate: (a) estimate with `work_status = 'created job from estimate'` and at least one option that is both approved (`approval_status IN ('approved','pro approved')`) and priced (`total_amount > 0`) IS discovered as qualified; (b) estimate with priced options but no approved option is NOT discovered; (c) estimate with approved options but `total_amount = 0` is NOT discovered; (d) estimate with no options is NOT discovered.
 - [ ] 7.3 Add a pgTAP test covering the new converted gate: estimate with a row in `jobs` referencing it IS discovered as converted (regardless of option `approval_status`); estimate with approved options but no job is NOT discovered.
 - [ ] 7.4 Add a pgTAP test for `resolve_estimate_gclid(eid)`: anchor uses `GREATEST(e.updated_at, MAX(jobs.updated_at))`; returns newest in-window; returns NULL when none in window.
 - [ ] 7.5 Add a pgTAP test covering shared-resolver discovery: when `discover_pending_conversions_for_estimate(eid)` inserts booking, qualified, AND converted rows in the same run, all three rows have identical `gclid` values.
@@ -58,12 +58,13 @@
 
 - [ ] 8.1 Apply all migrations against the local Supabase instance (do NOT run against remote per safety rules — hand off to user for remote deploy).
 - [ ] 8.2 Run `SELECT count(*) FROM gads_conversion_uploads WHERE status = 'pending' AND gclid IS NULL AND conversion_type IN ('qualified_lead','converted_lead');` before and after the backfill migration; record both numbers.
-- [ ] 8.3 Run `SELECT * FROM discover_pending_conversions();` and confirm the qualified_leads / converted_leads counts now include rows whose estimates have `work_status = 'created job from estimate'`.
-- [ ] 8.4 Spot-check the three previously diagnosed estimates (7363, 7372, 7406) and confirm:
-  - All three have booking, qualified, converted rows with the same `gclid` value
+- [ ] 8.3 Run `SELECT * FROM discover_pending_conversions();` and confirm the qualified_leads / converted_leads counts now include rows whose estimates have `work_status = 'created job from estimate'` and an approved priced option.
+- [ ] 8.4 Spot-check the previously diagnosed estimates (7363, 7372, 7406, **7536 — Darren Anthony**) and confirm:
+  - Each has booking, qualified, converted rows with the same `gclid` value (or all-NULL for 7536, which has no attributable source data)
   - 7363 qualified row's `gclid` is now populated
   - 7372 qualified row now exists with the correct gclid
   - 7406 qualified row now exists with the correct gclid
+  - 7536 qualified row now exists (gclid expected NULL — customer has no booking_tags, no callrail_leads, no `customer_gclids` entry; row should upload as enhanced-conversion-only, matching the existing converted_lead row)
 - [ ] 8.5 In the dashboard, switch between conversion modes and confirm:
   - `pre-discovery` mode: badge still shows `GCLID ×N` from the pool
   - `qualified` mode: badge shows for rows where `qualified_gclid IS NOT NULL`; muted `n in pool` indicator appears for rows where it's NULL but the pool is non-empty

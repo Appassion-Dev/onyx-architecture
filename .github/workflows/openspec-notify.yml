@@ -7,10 +7,9 @@ on:
       - 'reports/**'
   workflow_dispatch:
     inputs:
-      files:
-        description: "Space-separated list of report files to simulate as changed (e.g. reports/may-18-25-2026-changes-report.md)"
+      report:
+        description: "Path to a report file to summarize (e.g. reports/may-18-25-2026-changes-report.md)"
         required: true
-        default: "reports/may-18-25-2026-changes-report.md"
 
 permissions:
   contents: read
@@ -28,7 +27,7 @@ jobs:
         id: diff
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "${{ github.event.inputs.files }}" | tr ' ' '\n' > /tmp/changed_files.txt
+            echo "${{ github.event.inputs.report }}" > /tmp/changed_files.txt
           else
             git diff --name-only HEAD~1 HEAD > /tmp/changed_files.txt
           fi

@@ -1,6 +1,6 @@
-# May 18–25, 2026 — Changes Report
+# May 18–24, 2026 — Changes Report
 
-A walkthrough of every OpenSpec change touched between May 18 and May 25 inclusive. Each entry notes status, then breaks the work down into what landed in the **database** (schema, views, functions, migrations) and in the **frontend** (Conversions page, Workbench, hooks, components). Two changes (`gads-conversion-error-dispositions` and `gads-upload-step-tests`) are listed as in-progress only because their final manual-verification step hasn't been signed off — the code itself is complete.
+A walkthrough of every OpenSpec change touched between May 18 and May 24 inclusive, plus the two changes that landed on May 25 as the week's closeout (`classify-callrail-call-forwarding-as-direct` and `gads-upload-fix-and-refactor`). Each entry notes status, then breaks the work down into what landed in the **database** (schema, views, functions, migrations) and in the **frontend** (Conversions page, Workbench, hooks, components). Two changes (`gads-conversion-error-dispositions` and `gads-upload-step-tests`) are listed as in-progress only because their final manual-verification step hasn't been signed off — the code itself is complete.
 
 ---
 
@@ -16,7 +16,7 @@ Three threads run through every change:
 
 3. **Get the upload edge function into a state where each step is independently testable.** The 399-line `handlePost` was broken into eleven purpose-named modules, four spec-compliance bugs were fixed in the process, and unit tests were added for every module plus an orchestrator-level test that exercises every routing branch of `handlePost` via the existing `_mock_response` hook — no live Google calls required.
 
-Net result by Sunday: the upload pipeline is no longer a single 400-line function returning truncated strings. It is a state machine driven by a configurable disposition table, with per-batch raw payloads visible in the UI, per-module unit tests, and a redesigned rollup rail that exposes the Smart Bidding signal-quality and acceptance metrics directly.
+Net result by the close of the week: the upload pipeline is no longer a single 400-line function returning truncated strings. It is a state machine driven by a configurable disposition table, with per-batch raw payloads visible in the UI, per-module unit tests, and a redesigned rollup rail that exposes the Smart Bidding signal-quality and acceptance metrics directly.
 
 ---
 
@@ -141,7 +141,9 @@ The `customer_gclids` discovery pre-pass (and its sibling `backfill_customer_gcl
 
 ---
 
-## May 25 — Two simultaneous landings: classifying call-forwarding leads as Direct, and finishing the upload-function refactor
+## May 25 — Week closeout: classifying call-forwarding leads as Direct, and finishing the upload-function refactor
+
+These two changes landed on May 25, one day past the nominal window; they are included here as the closeout of the week's upload-and-attribution work.
 
 ### `classify-callrail-call-forwarding-as-direct` — *archived*
 

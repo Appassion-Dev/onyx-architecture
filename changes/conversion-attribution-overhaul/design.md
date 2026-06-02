@@ -22,7 +22,7 @@ The seven changes enumerated in `proposal.md` map onto the design decisions belo
 | 1 | Rewrite resolver — newest in-window, never NULL when fresh    | Decision 3       | `customer-gclid-attribution`                   |
 | 2 | Re-attribution pass for qualified/converted in discovery      | Decisions 4, 6   | `conversion-populate`, `customer-gclid-attribution` |
 | 3 | Reduce upload cron to once per day                            | Decision 5       | `conversion-upload`                            |
-| 4 | Qualified gate = "estimate has a priced option"               | Decisions 1, 8   | `pipeline-stage-qualified`                     |
+| 4 | Qualified gate = "estimate has an approved priced option"     | Decisions 1, 8   | `pipeline-stage-qualified`                     |
 | 5 | Converted gate = "a job exists for the estimate"              | Decisions 2, 8   | `pipeline-stage-converted`                     |
 | 6 | Per-stage GCLID badge on the Conversions page                 | Decision 11      | `conversions-gclid-tag`                        |
 | 7 | Resolve GCLID once per estimate per discovery, share across 3 stages (with per-stage window check at upload) | Decisions 9, 10  | `customer-gclid-attribution`, `conversion-populate`, `conversion-upload` |
@@ -30,7 +30,7 @@ The seven changes enumerated in `proposal.md` map onto the design decisions belo
 ## Goals / Non-Goals
 
 **Goals:**
-- Eliminate the gate asymmetry between qualified and converted by re-keying both gates on objective lifecycle events (priced option exists; job exists) rather than secondary status fields that lag behind reality.
+- Eliminate the gate asymmetry between qualified and converted by re-keying both gates on objective lifecycle events (approved priced option exists; job exists) rather than secondary status fields that lag behind reality.
 - Replace the oldest-in-window GCLID selection with newest-in-window so a stale historical click does not suppress a usable fresh one.
 - Make NULL-gclid pending rows recoverable by adding a re-attribution pass to discovery.
 - Give the discovery + re-attribution loop time to settle before uploads commit by reducing upload cron frequency to once per day.
@@ -45,14 +45,19 @@ The seven changes enumerated in `proposal.md` map onto the design decisions belo
 
 ## Decisions
 
-### Decision 1: Qualified gate becomes "any priced option exists" — implements proposal point #4
-The qualified gate is changed from `e.work_status IN ('complete rated','complete unrated')` to `EXISTS (estimate_options eo WHERE eo.estimate_id = e.id AND eo.total_amount > 0)`. The `work_status` check is dropped entirely.
+### Decision 1: Qualified gate becomes "an approved priced option exists" — implements proposal point #4
+The qualified gate is changed from `e.work_status IN ('complete rated','complete unrated')` to `EXISTS (estimate_options eo WHERE eo.estimate_id = e.id AND eo.approval_status IN ('approved','pro approved') AND eo.total_amount > 0)`. The `work_status` check is dropped entirely.
 
-**Rationale:** Qualified represents "this lead has measurable scope" — semantically closer to option pricing than to job rating. The current gate makes qualified arrive *after* converted in many lifecycles (because the estimate's own work_status only flips to `'complete rated'` once the job is rated, which often happens days after conversion). The new gate fires at the moment the lead is genuinely qualified.
+**Rationale:** Qualified represents "the customer has accepted measurable scope" — option approval (with non-zero pricing) is the cleanest, earliest signal that the lead has converted into committed scope. The current gate makes qualified arrive *after* converted in many lifecycles (because the estimate's own work_status only flips to `'complete rated'` once the job is rated, which often happens days after the customer has already approved options and a job has been created). The new gate fires at the moment the customer commits.
+
+The `total_amount > 0` clause is retained alongside approval to guard against zero-value approvals (free service calls, courtesy callbacks) that should not be counted as qualified bidding signal.
+
+Pairing this with Decision 2 (converted = "a job exists") preserves the qualified→converted ordering: approval happens at or before job creation in the HCP lifecycle.
 
 **Alternatives considered:**
 - Keep `work_status` and *also* fire when options are approved → still leaves the asymmetry in place; just adds an OR.
-- Use `approval_status IN ('approved','pro approved')` to mirror the current converted gate → would make qualified and converted near-simultaneous; loses the funnel-stage distinction.
+- Gate on `total_amount > 0` only (priced, regardless of approval) → fires too early; an unapproved-but-priced option is a quote the customer never committed to. Inflates the qualified cohort with unqualified leads.
+- Gate on `approval_status` only (no `total_amount` clause) → admits $0 approvals as qualified signal; pollutes Smart Bidding training data with non-revenue events.
 
 ### Decision 2: Converted gate becomes "a job exists for the estimate" — implements proposal point #5
 The converted gate is changed from `EXISTS (estimate_options.approval_status IN ('approved','pro approved'))` to `EXISTS (jobs WHERE jobs.original_estimate_id = e.id)`. The conversion_value is the most-recent job's `total_amount / 100.0`; the conversion_datetime is that job's `updated_at`; the `job_id` column on the upload row references that job.
@@ -130,8 +135,8 @@ Rows with `status = 'uploaded'` are left untouched, even if the new gate definit
 
 **Rationale:** Once an event is uploaded to Google Ads, it exists in the Ads conversion ledger. Modifying our local row does not reach back to Google. The only honest options are (a) treat the local row as the historical record of what we sent and leave it, or (b) add a separate `superseded_at` column to track which rows would no longer fit current logic. Option (a) is simpler and what we choose. Future audits can join against the current gate definitions to detect fossils explicitly.
 
-### Decision 8: Use `e.updated_at` and the most-recent job's `updated_at` as the conversion_datetime anchor — supports proposal points #4 and #5
-For the new qualified gate (priced option), `conversion_datetime` continues to use `e.updated_at` — this is the closest available signal to "when the option was priced," because options don't carry a separate `priced_at` column. For the new converted gate (job exists), `conversion_datetime` becomes `MAX(j.updated_at)` across jobs for the estimate.
+### Decision 8: Use `MAX(eo.updated_at)` (across approved priced options) and the most-recent job's `updated_at` as the conversion_datetime anchor — supports proposal points #4 and #5
+For the new qualified gate (approved priced option), `conversion_datetime` is `MAX(eo.updated_at)` across the `estimate_options` rows for that estimate that satisfy `approval_status IN ('approved','pro approved') AND total_amount > 0` — i.e., the moment of approval. This is closer to the qualifying event than `e.updated_at` and matches how the prior converted-gate function anchored its datetime. For the new converted gate (job exists), `conversion_datetime` becomes `MAX(j.updated_at)` across jobs for the estimate.
 
 **Rationale:** Keeps the existing column semantics. The 90-day window math and the existing `idx_gads_pending_datetime` partial index continue to work without schema change.
 
@@ -253,7 +258,7 @@ When the badge is hidden in a stage mode (because that stage's stored gclid is N
 
 ## Risks / Trade-offs
 
-- **[Risk] Conversion event timing in Google Ads shifts earlier** → Smart Bidding models will see qualified events firing at priced-option creation rather than at job rating. Brief learning-period turbulence is expected. Mitigation: deploy on a Monday so a full week of new signal accumulates before evaluating; document the change in the marketing ops log.
+- **[Risk] Conversion event timing in Google Ads shifts earlier** → Smart Bidding models will see qualified events firing at customer approval of a priced option rather than at job rating. Brief learning-period turbulence is expected. Mitigation: deploy on a Monday so a full week of new signal accumulates before evaluating; document the change in the marketing ops log.
 
 - **[Risk] Backfill could re-attribute large batches incorrectly if `customer_gclids` itself is wrong** → Mitigation: the backfill uses the same resolver as future discovery, so its correctness is identical to the resolver's. Run on a copy first; the UPDATE is idempotent (re-running with the same `customer_gclids` produces the same result) and can be scoped by date.
 
@@ -265,7 +270,7 @@ When the badge is hidden in a stage mode (because that stage's stored gclid is N
 
 - **[Risk] Existing `vw_conversion_candidates` view has columns derived from the old gate definitions** → If any consumer of the view relies on the prior qualified/converted semantics, they may see different rows than before. Mitigation: audit the view and dependent dashboards as part of the implementation; the view's pivot of `gads_conversion_uploads` rows is unchanged in shape.
 
-- **[Trade-off] Larger qualified cohort means more uploads to Google Ads** → Recovering ~1,082 missing qualified events plus all future similarly-shaped estimates increases API call volume. Daily-instead-of-frequent cadence keeps total call count manageable.
+- **[Trade-off] Larger qualified cohort means more uploads to Google Ads** → Under the tighter "approved AND priced" gate, ~1,074 missing qualified events become newly discoverable (counted 2026-05-26 against current `estimates` × `estimate_options` state). Plus all future similarly-shaped estimates. Daily-instead-of-frequent cadence keeps total call count manageable.
 
 - **[Trade-off] No history-trail for re-attribution** → When the re-attribution pass updates a row's gclid, no audit row records the prior value. If this becomes important for forensics, a separate `gads_conversion_uploads_audit` table can be added later; for now it is out of scope.
 
@@ -279,7 +284,7 @@ When the badge is hidden in a stage mode (because that stage's stored gclid is N
    - Optional: refresh `vw_conversion_candidates` if any computed column depends on the old gate semantics
 2. **Update upload cron schedule** in `supabase/config.toml` (or wherever cron is configured) to once daily.
 3. **Update or add pgTAP tests** under `supabase/tests/`:
-   - Qualified gate fires on priced option, not on `work_status`
+   - Qualified gate fires on an approved priced option, not on `work_status`
    - Converted gate fires on job existence
    - DESC in-window resolver returns newest in-window GCLID; returns NULL only when none in window
    - Re-attribution pass updates NULL pending rows when `customer_gclids` has an in-window entry

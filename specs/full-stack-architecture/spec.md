@@ -388,6 +388,11 @@ Matches the new `callrail_leads` row to an existing customer and estimate:
 4. If a customer is found, set `callrail_leads.customer_id`
 5. Find the most recent estimate for that customer and set `callrail_leads.estimate_id`
 
+**Multi-estimate attribution caveat:**  
+Step 5 uses a strict `ORDER BY created_at DESC LIMIT 1` tiebreak. When a customer has more than one estimate, the call binds to the **newest** one — regardless of which estimate the call actually concerned, and regardless of `work_status` (a canceled or `$0` estimate is an equally valid target). The choice is **sticky**: once `estimate_id` is set, the resync cron (below) only refills rows where `estimate_id IS NULL`, so a correlation is never re-pointed if a newer estimate later appears or the bound estimate is canceled.
+
+This propagates into Booking Lead discovery (Stage 9a): booking-lead eligibility is per-estimate via the correlated call, so the booking conversion lands on whichever estimate won the tiebreak — even a canceled one — while a sibling estimate for the same customer may carry the Qualified/Converted stages. The result is a funnel split across two estimate records for a single customer interaction. Booking Lead carries a NULL value, so Google Ads still receives one booking count either way; the impact is to internal pipeline-view coherence, plus the edge case where a lead that books but never qualifies leaves its only conversion on the wrong or canceled estimate.
+
 **Resync cron (every 30 min):**  
 `resync_callrail_estimates()` re-runs the matching logic for any `callrail_leads` rows where `estimate_id IS NULL`. Handles cases where the call arrives before the booking is created in HCP.
 
@@ -462,10 +467,12 @@ These estimates are still **visible** in the dashboard's conversions pipeline �
 
 | Field | Value |
 |---|---|
-| Trigger condition | `is_booking_form = true` OR `booking_tags` rows exist OR `callrail_leads` correlated OR `lead_source IS NOT NULL` |
+| Trigger condition | `is_booking_form = true` OR `booking_tags` rows exist OR `callrail_leads` correlated (the 3 branches in the deployed `get_pending_booking_lead_conversions()`) |
 | `conversion_datetime` | `estimates.created_at` |
 | `conversion_value` | NULL (no price yet) |
 | GCLID source | `booking_tags.gclid` or correlated `callrail_leads.gclid` |
+
+**Note — staged extension not yet deployed:** Migration `20260526000002_booking_lead_repeat_customer_gclid.sql` adds a 4th eligibility branch (customer has any `customer_gclids` row) and a 3rd GCLID fallback (oldest `customer_gclids` by `first_seen_at`), to discover booking leads for repeat customers whose GCLID was captured on a prior estimate. As of this writing the migration file exists in the repo but is **not applied** to the database (applied migrations end at `20260526000001`), so the live function still uses the 3 branches above. (A separate earlier `lead_source IS NOT NULL` gate was removed in `20260422000003_remove_lead_source_discovery_gate`.)
 
 #### Stage 9b: Qualified Lead
 

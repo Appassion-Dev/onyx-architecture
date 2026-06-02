@@ -313,18 +313,16 @@ def main(changed_files_path: str) -> None:
         print("No report changes — skipping notification.")
         return
 
-    sections: list[dict] = []
     for f in reports:
         summary = summarize_report(f)
-        sections.append({
+        section = {
             "emoji": "📊",
             "title": report_title(f),
             "summary": summary or "_Summary unavailable — see linked file._",
             "files": [f],
-        })
-
-    blocks = build_blocks(sections)
-    post_to_slack(blocks)
+        }
+        blocks = build_blocks([section])
+        post_to_slack(blocks)
 
 
 if __name__ == "__main__":

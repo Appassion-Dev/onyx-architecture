@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Onyx Conversion Tracking — Working Doc</title>
+<style>
+  :root {
+    --bg: #faf9f7; --ink: #1a1d24; --muted: #5c6577; --faint: #888780;
+    --line: #e4e7ec; --line2: #c9cdd6; --accent: #f5a623; --accentd: #b07712;
+    --code-bg: #f1eff0;
+    --book-bg:#E6F1FB; --book-fg:#0C447C;
+    --qual-bg:#FAEEDA; --qual-fg:#633806;
+    --conv-bg:#EAF3DE; --conv-fg:#27500A;
+    --imm:#27500A; --snap:#854F0B; --flag:#A32D2D;
+    --card:#ffffff;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Helvetica Neue", Arial, sans-serif; color: var(--ink); background: var(--bg); font-size: 14px; line-height: 1.6; padding: 32px 24px 80px; }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+
+  .head { border-bottom: 2px solid var(--accent); padding-bottom: 14px; margin-bottom: 28px; }
+  .eyebrow { font-family: "SF Mono", "Courier New", monospace; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--accentd); margin-bottom: 8px; }
+  h1 { font-size: 26px; font-weight: 600; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); font-size: 14px; margin-top: 6px; }
+  .meta { font-family: "SF Mono","Courier New", monospace; font-size: 11px; color: var(--faint); margin-top: 10px; }
+
+  .sec { margin-top: 34px; }
+  .sec-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 14px; }
+  .sec-num { font-family: "SF Mono","Courier New", monospace; font-size: 13px; font-weight: 700; color: var(--accentd); background: var(--accent); color: #3a2a00; width: 26px; height: 26px; border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  h2 { font-size: 18px; font-weight: 600; }
+  .sec-note { color: var(--muted); font-size: 13px; margin: 0 0 14px 38px; }
+
+  table { width: 100%; border-collapse: collapse; background: var(--card); border-radius: 8px; overflow: hidden; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+  th { text-align: left; vertical-align: top; padding: 10px 12px; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; border-bottom: 1.5px solid var(--line2); }
+  td { vertical-align: top; padding: 13px 12px; border-bottom: 1px solid var(--line); font-size: 13px; }
+  tr:last-child td { border-bottom: none; }
+  code { font-family: "SF Mono","Courier New", monospace; font-size: 12px; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; white-space: nowrap; }
+  .nm { font-family: "SF Mono","Courier New", monospace; font-size: 13px; font-weight: 700; display: block; margin-bottom: 4px; }
+  .id { font-family: "SF Mono","Courier New", monospace; font-size: 11px; color: var(--faint); display: block; margin-bottom: 7px; }
+  .pill { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 11px; }
+  .p-book { background: var(--book-bg); color: var(--book-fg); }
+  .p-qual { background: var(--qual-bg); color: var(--qual-fg); }
+  .p-conv { background: var(--conv-bg); color: var(--conv-fg); }
+  .imm { color: var(--imm); font-weight: 700; }
+  .snap { color: var(--snap); font-weight: 700; }
+  .flag { color: var(--flag); font-weight: 700; }
+  .ex { display:block; margin-top:6px; font-size:11px; color: var(--faint); font-style: italic; line-height:1.4; }
+  .amp { font-family:"SF Mono","Courier New",monospace; font-size:10px; font-weight:700; color: var(--accentd); padding:0 2px; }
+
+  /* pipeline steps */
+  .flow { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-left: 38px; }
+  .step { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; position: relative; }
+  .step .n { font-family: "SF Mono","Courier New", monospace; font-size: 10px; color: var(--accentd); font-weight: 700; }
+  .step .t { font-weight: 600; font-size: 13px; margin: 4px 0 5px; }
+  .step .d { font-size: 11.5px; color: var(--muted); line-height: 1.45; }
+
+  /* source list */
+  .srcs { margin-left: 38px; }
+  .src { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin-bottom: 8px; display: flex; gap: 14px; align-items: flex-start; }
+  .src .rank { font-family: "SF Mono","Courier New", monospace; font-weight: 700; color: var(--accentd); font-size: 13px; flex-shrink: 0; width: 18px; }
+  .src .body { flex: 1; }
+  .src .st { font-weight: 600; font-size: 13.5px; }
+  .src .sd { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+  .tag { display:inline-block; font-family:"SF Mono","Courier New",monospace; font-size:10px; padding:1px 7px; border-radius:10px; margin-left:6px; }
+  .tag-have { background:#EAF3DE; color:#27500A; }
+  .tag-gap { background:#FBEBEB; color:#A32D2D; }
+  .tag-plan { background:#FAEEDA; color:#633806; }
+
+  /* decisions */
+  .dec { background: #FFF8EC; border: 1px solid #F0D9A8; border-radius: 8px; padding: 16px 18px; margin-left: 38px; }
+  .dec-item { padding: 10px 0; border-bottom: 1px dashed #ecd7a5; }
+  .dec-item:last-child { border-bottom: none; }
+  .dec-q { font-weight: 600; font-size: 13.5px; }
+  .dec-o { font-size: 12.5px; color: var(--muted); margin-top: 3px; }
+  .lean { color: var(--imm); font-weight: 600; }
+
+  .foot { margin-top: 40px; padding-top: 14px; border-top: 1px solid var(--line); font-family: "SF Mono","Courier New", monospace; font-size: 11px; color: var(--faint); display: flex; justify-content: space-between; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="head">
+    <div class="eyebrow">Onyx Electric ERP · Conversion Tracking · Working Doc</div>
+    <h1>Lead → Conversion → Google Ads: how it should work</h1>
+    <div class="sub">The agreed flow in plain terms, the exact HCP/Google Ads fields behind each step, and the open decisions still to make.</div>
+    <div class="meta">Account 5797800849 · MCC 6983048345 · validated against 5,262 option rows / 7,831-estimate export · DRAFT v0.1</div>
+  </div>
+
+  <!-- STEP OVERVIEW -->
+  <div class="sec">
+    <div class="sec-head"><span class="sec-num">0</span><h2>The whole system in five steps</h2></div>
+    <div class="flow">
+      <div class="step"><div class="n">STEP 1</div><div class="t">Catch the events</div><div class="d">Detect when an estimate is scheduled, done, and approved/converted.</div></div>
+      <div class="step"><div class="n">STEP 2</div><div class="t">Freeze the timestamp</div><div class="d">Decide the correct status + date for each; snapshot the mutable ones.</div></div>
+      <div class="step"><div class="n">STEP 3</div><div class="t">Link the lead source</div><div class="d">Tie each conversion back to where the lead came from.</div></div>
+      <div class="step"><div class="n">STEP 4</div><div class="t">Send & confirm</div><div class="d">Upload to Google Ads and verify it was accepted, no silent fails.</div></div>
+      <div class="step"><div class="n">STEP 5</div><div class="t">Monitor for gaps</div><div class="d">Flag when a conversion should exist but didn't arrive.</div></div>
+    </div>
+  </div>
+
+  <!-- STEP 1+2 -->
+  <div class="sec">
+    <div class="sec-head"><span class="sec-num">1</span><h2>Catch the events &amp; freeze the timestamp</h2></div>
+    <p class="sec-note">The three Google Ads actions, mapped to the exact Housecall Pro API field that fires each. Field paths and example values are taken from the live estimates payload (<code>response-2.json</code>, 7,761 estimates). <span class="imm">Green</span> = immutable date (trustworthy retroactively); <span class="snap">amber</span> = mutable, must be snapshotted on first sighting.</p>
+    <table>
+      <thead><tr>
+        <th style="width:17%">Google Ads action</th>
+        <th style="width:21%">What it means in real life</th>
+        <th style="width:34%">How we catch it in HCP (exact fields)</th>
+        <th style="width:28%">Comments — watch for</th>
+      </tr></thead>
+      <tbody>
+        <tr>
+          <td><span class="nm">BOOKING_CONFIRMED</span><span class="id">id 7576326162</span><span class="pill p-book">Scheduled</span></td>
+          <td>The estimate is on the dispatch board, scheduled, and assigned to a technician — the estimate is successfully booked and we're sending a tech out.</td>
+          <td><code>options[].status</code> = <code>"scheduled"</code> <span class="amp">AND</span> <code>assigned_employees[]</code> non-empty (a tech is assigned).<br><span class="snap">Conversion timestamp:</span> <code>booked_at</code> = the moment our sync <em>first observes</em> that scheduled + assigned state (snapshot <code>observed_at</code>). <span class="flag">Validated:</span> <code>created_at</code> is the estimate's birth, often <em>earlier</em> than the booking (e.g. #7760 created 20:38:46 but the record changed at 20:49:12); <code>scheduled_start</code> is the future appointment (up to <strong>6.7 days</strong> out in this sample). Neither marks the booking moment.<br><span class="ex">Use <code>created_at</code> only as a fallback when <code>created_at == updated_at</code> (estimate created already-scheduled in one step).</span></td>
+          <td><em>The "how we catch it" logic at left is the proposed concept — to be validated in implementation.</em><br><strong>Still to validate (HCP side):</strong> that <code>updated_at</code> moves when status → <code>scheduled</code>, and which exact timestamp to send. Confirm by watching one estimate across two syncs. <code>scheduled_start</code> = appointment date (mutable), <span class="flag">not</span> the conversion time.</td>
+        </tr>
+        <tr>
+          <td><span class="nm">Qualified leads</span><span class="id">id 6802897127</span><span class="pill p-qual">Qualified</span></td>
+          <td>A qualified lead: the customer was visited by a technician and received an estimate from us — real value and genuine potential, not just a booking.</td>
+          <td><code>options[].status</code> ∈ {<code>"complete rated"</code>, <code>"complete unrated"</code>, <code>"created job from estimate"</code>}, OR an option was approved on-site.<br><span class="imm">Anchor timestamp:</span> first available in the fallback chain → sent-snapshot → approved-snapshot → <code>completed_at</code> → <code>started_at</code> → <code>on_my_way_at</code> → <code>created_at</code> (see Comments).<br><span class="ex">e.g. est #7759 — approved on the job, never sent, <code>completed_at: null</code> → anchor falls back to approved-snapshot (<code>updated_at 2026-06-01T20:46:13Z</code>), or <code>started_at 2026-06-01T20:31:06Z</code> if no snapshot exists yet.</span></td>
+          <td><em>Anchor = first available, in this fallback order (sent-first, per business definition "estimate presented"):</em><br>1. <span class="snap">sent snapshot</span> — <code>updated_at</code> when status → submitted for signoff (the quote was presented — primary anchor)<br>2. <span class="snap">approved snapshot</span> — <code>updated_at</code> when <code>approval_status</code> → approved / pro approved (covers "approved on the job, never sent")<br>3. <code>completed_at</code> — visit finished<br>4. <code>started_at</code> — tech began on-site <span class="ex">(#7759 has this; <code>completed_at</code> null)</span><br>5. <code>on_my_way_at</code> — tech en route<br>6. <code>option.created_at</code> — last resort.<br><span class="flag">Watch:</span> no real <code>sent_at</code>/<code>approved_at</code> exists — the top two anchors are <span class="snap">snapshots only</span>, so sent-first <span class="flag">requires the snapshot tracker to be live</span>. Until then it falls through to the real visit timestamps. Also <span class="flag">not counted</span>, <code>MANY_PER_CLICK</code>, $250 default.</td>
+        </tr>
+        <tr>
+          <td><span class="nm">Converted leads</span><span class="id">id 6794281105</span><span class="pill p-conv">Converted</span></td>
+          <td>The sale — customer said yes and a real job was created with revenue attached.</td>
+          <td><code>options[].approval_status</code> ∈ {<code>"approved"</code>, <code>"pro approved"</code>} <span class="amp">AND</span> a linked Job (<code>job_…</code>) exists.<br><span class="imm">Anchor timestamp:</span> <code>job.created_at</code> (<span class="imm">immutable</span>).<br><span class="imm">Value:</span> <code>options[].total_amount</code> ÷ 100.<br><span class="ex">e.g. est #7759 — <code>approval_status: "pro approved"</code>, <code>total_amount: 405000</code> → $4,050.00</span></td>
+          <td>The <span class="imm">only</span> action that counts toward bidding. <code>total_amount</code> is in <span class="flag">cents</span> — divide by 100. Confirm a real Job ID — not status <code>"created job from estimate"</code> alone (2,102 rows vs 358 with a Job ID).</td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="sec-note" style="margin-top:12px;"><strong>Confirmed field paths</strong> (live payload): estimate root <code>id</code> = <code>csr_…</code>; <code>work_status</code>; <code>schedule.scheduled_start</code> / <code>scheduled_end</code> (= future appointment slot, <span class="flag">not</span> a conversion time); <code>work_timestamps.{on_my_way_at, started_at, completed_at}</code>; <code>lead_source</code>. Per option in <code>options[]</code>: <code>id</code> = <code>est_…</code>, <code>status</code>, <code>approval_status</code>, <code>total_amount</code> (cents), <code>created_at</code>, <code>updated_at</code>. Dates are ISO-8601 UTC (<code>…Z</code>) — store UTC, report in ET. <strong>Rule (validated against live API):</strong> a conversion's timestamp is <em>when the status transition is first observed</em> (snapshot), never <code>scheduled_start</code>, and not <code>created_at</code> when it differs from <code>updated_at</code> — <code>created_at</code> is the estimate's birth and can predate the booking by minutes to hours.</p>
+  </div>
+
+  <!-- STEP 3 -->
+  <div class="sec">
+    <div class="sec-head"><span class="sec-num">2</span><h2>Link each conversion to its lead source</h2></div>
+    <p class="sec-note">A conversion is only useful to Google Ads if we know which lead — and ideally which click (GCLID) — produced it. Sources in priority order:</p>
+    <div class="srcs">
+      <div class="src"><span class="rank">1</span><div class="body"><span class="st">CallRail tracked calls</span><span class="tag tag-have">HAVE</span><div class="sd">Tracking numbers on every call. Match phone → estimate, pull GCLID from CallRail. Main source today.</div></div></div>
+      <div class="src"><span class="rank">2</span><div class="body"><span class="st">Online booking</span><span class="tag tag-plan">PARTIAL</span><div class="sd">Web form / booking-page leads. GA4 fire exists but needs GTM + GCLID capture on the form to attribute.</div></div></div>
+      <div class="src"><span class="rank">3</span><div class="body"><span class="st">Google Local Services (LSA)</span><span class="tag tag-gap">GAP</span><div class="sd">Tracked only via CallRail today. Plan: integrate Google LSA directly for proper lead-level attribution.</div></div></div>
+      <div class="src"><span class="rank">4</span><div class="body"><span class="st">Referral / organic</span><span class="tag tag-gap">GAP</span><div class="sd">No click to attribute. Need a tagging method (intake question, HCP lead-source field) so they're excluded cleanly, not misattributed.</div></div></div>
+      <div class="src"><span class="rank">5</span><div class="body"><span class="st">Recurring / repeat customers</span><span class="tag tag-plan">PARTIAL</span><div class="sd">Return customers shouldn't count as new paid conversions. Detect repeat customer → suppress or send at $1 (as Repeat Phone Call already does).</div></div></div>
+    </div>
+  </div>
+
+  <!-- STEP 4 -->
+  <div class="sec">
+    <div class="sec-head"><span class="sec-num">3</span><h2>Send to Google Ads &amp; confirm acceptance</h2></div>
+    <p class="sec-note">Upload offline conversions with the GCLID + timestamp + value, then store Google's response so nothing fails silently.</p>
+    <table>
+      <thead><tr><th style="width:30%">What we send</th><th style="width:35%">Source field</th><th style="width:35%">Confirm / watch</th></tr></thead>
+      <tbody>
+        <tr><td><code>gclid</code></td><td>CallRail match or form capture (Supabase <code>gads_conversion_uploads</code>)</td><td>Missing GCLID = can't upload. Track these as a known gap, not a failure.</td></tr>
+        <tr><td><code>conversion_action</code></td><td>One of the three IDs above</td><td>Must match the action that fired the stage.</td></tr>
+        <tr><td><code>conversion_date_time</code></td><td>The frozen <code>booked_at</code> / <code>completed_at</code> / <code>job.created_at</code></td><td>Must be in account timezone; within the action's click-conversion window.</td></tr>
+        <tr><td><code>conversion_value</code></td><td><code>Job Value</code> (cents ÷ 100) for Converted</td><td>Overrides the $250 default. Verify currency.</td></tr>
+        <tr><td>— upload result —</td><td>Google Ads API response</td><td><span class="flag">Store success/error per row.</span> Surface partial-failure errors instead of swallowing them.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- STEP 5 -->
+  <div class="sec">
+    <div class="sec-head"><span class="sec-num">4</span><h2>Monitor for missing conversions</h2></div>
+    <p class="sec-note">A dashboard/alert that flags when a stage <em>should</em> exist but didn't arrive — the safety net.</p>
+    <table>
+      <thead><tr><th style="width:40%">Check</th><th style="width:60%">Fires when</th></tr></thead>
+      <tbody>
+        <tr><td>Scheduled but no source</td><td>Booked estimate has no CallRail / form / LSA match → unattributed lead.</td></tr>
+        <tr><td>Qualified but never Scheduled</td><td>Completed estimate with no prior booked snapshot → snapshot logic missed a transition.</td></tr>
+        <tr><td>Converted but not uploaded</td><td>Job exists with GCLID but no successful Google Ads upload row.</td></tr>
+        <tr><td>Upload error / rejected</td><td>Google returned an error for a row → needs re-send or fix.</td></tr>
+        <tr><td>Stale snapshot</td><td>Status advanced in HCP but no event row was written → sync gap.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- DECISIONS -->
+  <div class="sec">
+    <div class="sec-head"><span class="sec-num">!</span><h2>Decisions to make</h2></div>
+    <p class="sec-note">The forks the data won't decide for us. Mark these up and we lock them into the spec.</p>
+    <div class="dec">
+      <div class="dec-item">
+        <div class="dec-q">1. Should Scheduled &amp; Qualified count toward Conversions, or stay observation-only?</div>
+        <div class="dec-o">Today both are <code>include_in_conversions: false</code>. <span class="lean">Lean: keep observation-only</span> — bid on Converted, watch the upper funnel. ☐ Keep ☐ Make biddable</div>
+      </div>
+      <div class="dec-item">
+        <div class="dec-q">2. LSA — keep CallRail-only, or build the Google LSA integration?</div>
+        <div class="dec-o"><span class="lean">Lean: build the integration</span> for proper lead-level attribution; CallRail under-counts LSA. ☐ Now ☐ Later ☐ CallRail-only</div>
+      </div>
+      <div class="dec-item">
+        <div class="dec-q">3. Recurring &amp; referral leads — exclude from uploads, or report-only?</div>
+        <div class="dec-o"><span class="lean">Lean: exclude from Google uploads</span>, keep for internal reporting. Need a reliable repeat-customer + lead-source flag. ☐ Exclude ☐ Send at $1 ☐ Report-only</div>
+      </div>
+      <div class="dec-item">
+        <div class="dec-q">4. Counting type — leave Qualified/Converted as MANY_PER_CLICK, or tighten to ONE_PER_CLICK?</div>
+        <div class="dec-o">Many-per-click can inflate when one customer spawns several estimates/jobs. ☐ Keep many ☐ One-per-click</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <span>Onyx Electric ERP · Conversion Tracking Module · DRAFT v0.1</span>
+    <span>HCP → Supabase → Google Ads · Closed-loop attribution</span>
+  </div>
+
+</div>
+</body>
+</html>

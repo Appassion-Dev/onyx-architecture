@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Onyx Conversion Tracking — Current Implementation</title>
+<style>
+  :root {
+    --bg: #faf9f7; --ink: #1a1d24; --muted: #5c6577; --faint: #888780;
+    --line: #e4e7ec; --line2: #c9cdd6; --accent: #f5a623; --accentd: #b07712;
+    --code-bg: #f1eff0;
+    --book-bg:#E6F1FB; --book-fg:#0C447C;
+    --qual-bg:#FAEEDA; --qual-fg:#633806;
+    --conv-bg:#EAF3DE; --conv-fg:#27500A;
+    --imm:#27500A; --snap:#854F0B; --flag:#A32D2D;
+    --card:#ffffff;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Helvetica Neue", Arial, sans-serif; color: var(--ink); background: var(--bg); font-size: 14px; line-height: 1.6; padding: 32px 24px 80px; }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+
+  .head { border-bottom: 2px solid var(--accent); padding-bottom: 14px; margin-bottom: 28px; }
+  .eyebrow { font-family: "SF Mono", "Courier New", monospace; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--accentd); margin-bottom: 8px; }
+  h1 { font-size: 26px; font-weight: 600; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); font-size: 14px; margin-top: 6px; }
+  .meta { font-family: "SF Mono","Courier New", monospace; font-size: 11px; color: var(--faint); margin-top: 10px; }
+
+  .sec { margin-top: 34px; }
+  .sec-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 14px; }
+  .sec-num { font-family: "SF Mono","Courier New", monospace; font-size: 13px; font-weight: 700; background: var(--accent); color: #3a2a00; width: 26px; height: 26px; border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  h2 { font-size: 18px; font-weight: 600; }
+  .sec-note { color: var(--muted); font-size: 13px; margin: 0 0 14px 38px; }
+
+  table { width: 100%; border-collapse: collapse; background: var(--card); border-radius: 8px; overflow: hidden; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+  th { text-align: left; vertical-align: top; padding: 10px 12px; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; border-bottom: 1.5px solid var(--line2); }
+  td { vertical-align: top; padding: 13px 12px; border-bottom: 1px solid var(--line); font-size: 13px; }
+  tr:last-child td { border-bottom: none; }
+  code { font-family: "SF Mono","Courier New", monospace; font-size: 12px; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; white-space: nowrap; }
+  .nm { font-family: "SF Mono","Courier New", monospace; font-size: 13px; font-weight: 700; display: block; margin-bottom: 4px; }
+  .id { font-family: "SF Mono","Courier New", monospace; font-size: 11px; color: var(--faint); display: block; margin-bottom: 7px; }
+  .pill { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 11px; }
+  .p-book { background: var(--book-bg); color: var(--book-fg); }
+  .p-qual { background: var(--qual-bg); color: var(--qual-fg); }
+  .p-conv { background: var(--conv-bg); color: var(--conv-fg); }
+  .imm { color: var(--imm); font-weight: 700; }
+  .snap { color: var(--snap); font-weight: 700; }
+  .flag { color: var(--flag); font-weight: 700; }
+  .ex { display:block; margin-top:6px; font-size:11px; color: var(--faint); font-style: italic; line-height:1.4; }
+  .amp { font-family:"SF Mono","Courier New",monospace; font-size:10px; font-weight:700; color: var(--accentd); padding:0 2px; }
+  .cfg { display:inline-block; font-family:"SF Mono","Courier New",monospace; font-size:9.5px; font-weight:700; padding:1px 6px; border-radius:9px; margin-top:7px; margin-right:4px; }
+  .cfg-obs { background:#eceef2; color:#5c6577; }
+  .cfg-bid { background:#EAF3DE; color:#27500A; }
+  .cfg-cnt { background:#FAEEDA; color:#633806; }
+
+  .foot { margin-top: 40px; padding-top: 14px; border-top: 1px solid var(--line); font-family: "SF Mono","Courier New", monospace; font-size: 11px; color: var(--faint); display: flex; justify-content: space-between; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="head">
+    <div class="eyebrow">Onyx Electric ERP · Conversion Tracking · Current Implementation</div>
+    <h1>Lead → Conversion → Google Ads: how it works today</h1>
+    <div class="sub">The three Google Ads actions mapped to the <strong>live</strong> detection logic actually deployed — the real Supabase functions and the HCP-derived fields each one reads.</div>
+    <div class="meta">Account 5797800849 · MCC 6983048345 · verified against live Supabase + Google Ads config · 2026-06-02 · CURRENT STATE</div>
+  </div>
+
+  <!-- STEP 1 -->
+  <div class="sec">
+    <div class="sec-head"><span class="sec-num">1</span><h2>Catch the events &amp; freeze the timestamp</h2></div>
+    <p class="sec-note">Detection is estimate-level and runs as three SQL functions; <code>discover_pending_conversions()</code> calls them and freezes each result into <code>gads_conversion_uploads</code> <em>once</em> (<code>ON CONFLICT (estimate_id, conversion_type) DO NOTHING</code>). <span class="imm">Green</span> = immutable timestamp (stable after the fact); <span class="snap">amber</span> = mutable field (recomputed every discovery run until the row is frozen). All dates stored UTC.</p>
+    <table>
+      <thead><tr>
+        <th style="width:17%">Google Ads action</th>
+        <th style="width:21%">What it means in real life</th>
+        <th style="width:34%">How we catch it in HCP (exact fields)</th>
+        <th style="width:28%">Comments — watch for</th>
+      </tr></thead>
+      <tbody>
+        <tr>
+          <td>
+            <span class="nm">BOOKING_CONFIRMED</span><span class="id">id 7576326162 · booking_lead</span><span class="pill p-book">Lead created</span><br>
+            <span class="cfg cfg-obs">NOT in conversions</span><span class="cfg cfg-cnt">ONE_PER_CLICK</span>
+          </td>
+          <td>An estimate exists that carries an <strong>attributable lead source</strong> — an online booking form, a tracked CallRail call, or a stored booking tag. In practice this marks <em>"an attributed lead was created,"</em> <span class="flag">not</span> a dispatch-board booking: there is no scheduled / assigned-tech check.</td>
+          <td><code>get_pending_booking_lead_conversions()</code>.<br><strong>Gate:</strong> <code>estimates.is_booking_form = true</code> <span class="amp">OR</span> a <code>booking_tags</code> row exists for the estimate <span class="amp">OR</span> a <code>callrail_leads</code> row matches the estimate <span class="amp">OR</span> a <code>customer_gclids</code> row exists for the customer. <span class="flag">(per migration 20260526000002 — unmerged)</span><br><span class="imm">Conversion timestamp:</span> <code>estimates.created_at</code> (<span class="imm">immutable</span>).<br><span class="imm">Value:</span> none — <code>NULL</code> (inherits Google's action default).<br><strong>GCLID:</strong> <code>booking_tags.value</code> where <code>key='gclid'</code> → newest <code>callrail_leads.gclid</code> by <code>call_started_at</code> → oldest <code>customer_gclids.gclid</code> by <code>first_seen_at</code> (first-touch).</td>
+          <td>No <code>scheduled</code> status, no <code>assigned_employees</code>, no snapshot — <code>created_at</code> is used directly and fires regardless of scheduling. The 4th gate branch extends detection to <strong>repeat customers</strong> whose GCLID was captured on a prior estimate (now in <code>customer_gclids</code>) but who carry no per-estimate signal on the follow-up. Frozen once at discovery; a row that lands with <code>gclid = NULL</code> is never re-resolved.<span class="ex">Per migration 20260526000002, currently unmerged — additive only (eligibility + a 3rd first-touch GCLID fallback); timestamp, value and de-dup unchanged. Out-of-window GCLIDs (<code>first_seen_at</code> &gt; 90 days before creation) are <span class="flag">not</span> filtered at discovery — they upload and land as <code>expired</code>.</span></td>
+        </tr>
+        <tr>
+          <td>
+            <span class="nm">Qualified leads</span><span class="id">id 6802897127 · qualified_lead</span><span class="pill p-qual">Qualified</span><br>
+            <span class="cfg cfg-obs">NOT in conversions</span><span class="cfg cfg-cnt">MANY_PER_CLICK</span>
+          </td>
+          <td>A completed estimate visit that produced at least one <strong>priced option</strong> — the customer was visited and given a quote. Real value beyond a booking.</td>
+          <td><code>get_pending_qualified_lead_conversions()</code>.<br><strong>Gate:</strong> <code>EXISTS</code> an <code>estimate_options</code> row with <code>approval_status IN ('approved','pro approved')</code> <span class="amp">AND</span> <code>total_amount &gt; 0</code>. <span class="flag">(per migration 20260526000001 — unmerged)</span><br><span class="snap">Anchor timestamp:</span> <code>estimates.updated_at</code> (<span class="snap">mutable</span>).<br><span class="snap">Value:</span> <code>AVG(estimate_options.total_amount) / 100</code> across <em>all</em> options on the estimate.<br><strong>GCLID:</strong> oldest <code>customer_gclids.gclid</code> with <code>first_seen_at ≥ updated_at − 90 days</code>; if none, <code>NULL</code> → enhanced-conversions fallback at upload.</td>
+          <td>Gate keys off customer <strong>approval of a priced option</strong> — <span class="flag">not</span> <code>estimates.work_status</code>. The old work_status gate went blind to the post-job-creation cohort (~1,074 estimates): once a job is created the estimate flips to <code>"created job from estimate"</code> and never reaches <code>complete rated/unrated</code>. No sent/approved snapshot and no fallback chain — <code>updated_at</code> moves on any re-sync. Value averages all options, <span class="flag">including unapproved</span>.<span class="ex">Per migration 20260526000001, currently unmerged — gate only; GCLID resolver, value, datetime and de-dup are unchanged from 20260511000001. Note this gate now overlaps the Converted gate (both fire on an approved option), so qualified + converted are produced for the same estimates.</span></td>
+        </tr>
+        <tr>
+          <td>
+            <span class="nm">Converted leads</span><span class="id">id 6794281105 · converted_lead</span><span class="pill p-conv">Converted</span><br>
+            <span class="cfg cfg-bid">IN conversions · primary</span><span class="cfg cfg-cnt">MANY_PER_CLICK</span>
+          </td>
+          <td>The sale — at least one estimate option was <strong>approved</strong> (or pro-approved) by the customer.</td>
+          <td><code>get_pending_converted_lead_conversions()</code>.<br><strong>Gate:</strong> <code>EXISTS</code> an <code>estimate_options</code> row with <code>approval_status IN ('approved','pro approved')</code>. <span class="flag">No linked-Job requirement</span> (<code>job_id</code> returned <code>NULL</code>).<br><span class="snap">Anchor timestamp:</span> <code>MAX(estimate_options.updated_at)</code> over the approved options (<span class="snap">mutable</span>).<br><span class="snap">Value:</span> <code>SUM(estimate_options.total_amount) / 100</code> over the approved options.<br><strong>GCLID:</strong> oldest <code>customer_gclids.gclid</code> with <code>first_seen_at ≥ MAX(approved updated_at) − 90 days</code>.</td>
+          <td>The <span class="imm">only</span> action that counts toward bidding (<code>include_in_conversions</code> + <code>primary_for_goal</code>). <code>job.created_at</code> is <span class="flag">not</span> used — the anchor is the mutable approved-option <code>updated_at</code>. <code>total_amount</code> is in <span class="flag">cents</span> → divide by 100. Value is the <span class="flag">sum</span> of all approved options, not a single option.</td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="sec-note" style="margin-top:12px;"><strong>How the row reaches Google (shared pipeline):</strong> <code>discover_pending_conversions()</code> runs the three functions above and inserts each result into <code>gads_conversion_uploads</code> as <code>status='pending'</code> / <code>lifecycle='queued'</code>, freezing the gclid + timestamp + value at that moment. The <code>google-ads-conversion-upload</code> function then drains <code>queued</code>/<code>retrying</code> rows: it attaches hashed email/phone (<strong>Enhanced Conversions</strong>) plus the GCLID when present, formats <code>conversion_date_time</code> in UTC (<code>+00:00</code>), and <span class="flag">expires</span> any row whose timestamp is older than 90 days before it is sent. Per-row Google responses (accepted / per-error) are stored back on the upload row and its batch.</p>
+  </div>
+
+  <div class="foot">
+    <span>Onyx Electric ERP · Conversion Tracking Module · Current Implementation</span>
+    <span>HCP → Supabase (get_pending_* → gads_conversion_uploads) → Google Ads</span>
+  </div>
+
+</div>
+</body>
+</html>

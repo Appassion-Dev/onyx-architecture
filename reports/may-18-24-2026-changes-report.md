@@ -1,6 +1,6 @@
 # May 18–24, 2026 — Changes Report
 
-A walkthrough of every OpenSpec change touched between May 18 and May 24 inclusive, plus the two changes that landed on May 25 as the week's closeout (`classify-callrail-call-forwarding-as-direct` and `gads-upload-fix-and-refactor`). Each entry notes status, then breaks the work down into what landed in the **database** (schema, views, functions, migrations) and in the **frontend** (Conversions page, Workbench, hooks, components). Two changes (`gads-conversion-error-dispositions` and `gads-upload-step-tests`) are listed as in-progress only because their final manual-verification step hasn't been signed off — the code itself is complete.
+A walkthrough of every OpenSpec change touched between May 18 and May 24 inclusive, plus the changes that landed just past the window as the week's closeout (`classify-callrail-call-forwarding-as-direct` and `gads-upload-fix-and-refactor` on May 25, `callrail-pull-cron` on May 26). Each entry notes status, then breaks the work down into what landed in the **database** (schema, views, functions, migrations) and in the **frontend** (Conversions page, Workbench, hooks, components). The foundational `gads-conversion-error-dispositions` change is also complete (its final manual-verification step has since been signed off).
 
 ---
 
@@ -22,7 +22,7 @@ Net result by the close of the week: the upload pipeline is no longer a single 4
 
 ## May 19 — Redesigning the Conversions rollup rail
 
-**`conversions-rollup-redesign`** — *archived*
+**`conversions-rollup-redesign`** — *complete*
 
 The biggest UX-level change of the period. The Conversions page rollup rail (Month → Week → Source) was rebuilt around metrics that map directly to how Google Ads actually receives conversions, an `All Conv` mode was added that shows booked / qualified / converted side-by-side, and the per-row upload UI was collapsed in favor of a single top-of-page Upload button.
 
@@ -47,7 +47,7 @@ The biggest UX-level change of the period. The Conversions page rollup rail (Mon
 
 ## May 20 — Locking down the upload edge function with tests
 
-**`gads-upload-step-tests`** — *in progress (code complete, manual verification pending)*
+**`gads-upload-step-tests`** — *complete*
 
 After the upload edge function was split into eleven small modules, only two of them (`outcomes.ts` and `error-parsing.ts`) had unit tests. The other nine seams were covered only by manual end-to-end runs against a live Google Ads account — a silent regression risk. This change is test-coverage-only; no production behavior changes.
 
@@ -72,7 +72,7 @@ After the upload edge function was split into eleven small modules, only two of 
 
 Three small parallel changes that close visibility and correctness gaps the error-disposition work opened up.
 
-### `capture-raw-batch-payloads` — *archived*
+### `capture-raw-batch-payloads` — *complete*
 
 When a batch fails or a customer disputes attribution, reconstructing the request from `gads_conversion_uploads` rows joined by `batch_id` is an approximation — it omits payload ordering, the exact wire shape, and any successful-result detail Google returned. Now the function persists both bodies verbatim.
 
@@ -88,7 +88,7 @@ When a batch fails or a customer disputes attribution, reconstructing the reques
 
 - [ads-api.ts](supabase/functions/google-ads-conversion-upload/ads-api.ts) now returns the request body alongside the response; [outcomes.ts](supabase/functions/google-ads-conversion-upload/outcomes.ts) and [batches.ts](supabase/functions/google-ads-conversion-upload/batches.ts) write both columns on every terminal path (success, partial failure, batch failure, network error, mock-response test path). Identifiers in `request_body` are already SHA-256 hashed — no additional PII risk.
 
-### `gads-discovery-lifecycle-default` — *archived*
+### `gads-discovery-lifecycle-default` — *complete*
 
 After the disposition refactor, the uploader picks up rows by filtering on `lifecycle IN ('queued', 'retrying')`. The two discovery functions (`discover_pending_conversions` and `discover_pending_conversions_for_estimate`) had never been updated when the `lifecycle` column was introduced — they were inserting with `status = 'pending'` only and leaving `lifecycle = NULL`. New rows were therefore invisible to the new uploader and silently never sent.
 
@@ -103,7 +103,7 @@ After the disposition refactor, the uploader picks up rows by filtering on `life
 
 - None. Pure database fix.
 
-### `view-batch-raw-payloads` — *archived*
+### `view-batch-raw-payloads` — *complete*
 
 The raw `request_body` / `response_body` JSON that `capture-raw-batch-payloads` started persisting was invisible in the app until this change. Investigation of a failed or partially-rejected batch required hand-querying Supabase. The Workbench Batches panel is where operators already triage uploads — that is where the raw payloads needed to surface.
 
@@ -124,7 +124,7 @@ The raw `request_body` / `response_body` JSON that `capture-raw-batch-payloads` 
 
 ## May 22 — Recovering CallRail GCLIDs lost to a structurally unnecessary join
 
-**`prepass-callrail-direct-customer-id`** — *archived*
+**`prepass-callrail-direct-customer-id`** — *complete*
 
 The `customer_gclids` discovery pre-pass (and its sibling `backfill_customer_gclids`) reached `callrail_leads → customer_id` indirectly through `JOIN estimates e ON e.id::varchar = cl.estimate_id`. That join silently dropped every CallRail lead whose `estimate_id` was NULL — which happens whenever the BEFORE-trigger correlator (`correlate_callrail_estimate`) matched a customer but could not pick a "most recent estimate" at write time. The lead's `customer_id` is already populated by the same trigger and is the value the pre-pass actually consumes; routing through `estimates` was structurally unnecessary and excluded usable GCLIDs.
 
@@ -145,7 +145,7 @@ The `customer_gclids` discovery pre-pass (and its sibling `backfill_customer_gcl
 
 These two changes landed on May 25, one day past the nominal window; they are included here as the closeout of the week's upload-and-attribution work.
 
-### `classify-callrail-call-forwarding-as-direct` — *archived*
+### `classify-callrail-call-forwarding-as-direct` — *complete*
 
 `vw_conversion_candidates.channel` was resolving to `'Other'` for three estimates (one customer — Curt Chandler, estimates #5953, #7543, and a sibling) whose CallRail lead had `source = 'Call forwarding'` and `medium = 'direct'` — the canonical "customer dialed a CallRail tracking number directly" signal. The existing CallRail branch of the channel CASE scanned `callrail_sources` for `LIKE '%direct%'`, which matched literal `source = 'Direct'` but missed the `'Call forwarding'` tracker-mode value entirely. The wider population of `'Call forwarding'` rows (40 total) doesn't translate into more affected estimates — 39 of 40 are call-tracking noise (CNAM strings, spam, unidentified callers) with no customer record at any point in time.
 
@@ -158,7 +158,7 @@ These two changes landed on May 25, one day past the nominal window; they are in
 
 - None. The Conversions page weekly rollup picks up the new Direct rows automatically; the Direct group label and ordering are unchanged.
 
-### `gads-upload-fix-and-refactor` — *archived*
+### `gads-upload-fix-and-refactor` — *complete*
 
 Follow-up cleanup after the error-disposition change shipped. Two parts: four small spec-compliance fixes (real but quiet bugs that verification against the `conversion-upload` spec surfaced) and the full module split of the 399-line `handlePost`.
 
@@ -180,11 +180,36 @@ Follow-up cleanup after the error-disposition change shipped. Two parts: four sm
 
 ---
 
-## In-progress: completed but not yet manually verified
+## May 26 — Letting CallRail ingestion run unattended
 
-These two changes are listed as in-progress only because their final "user runs the app / runs the migration / clicks through the seeded UI" verification steps haven't been signed off. The implementation is complete.
+**`callrail-pull-cron`** — *complete*
 
-### `gads-conversion-error-dispositions` — *in progress (code complete, manual verification pending)*
+The `callrail-pull` edge function only ran when a logged-in user triggered it from the UI, and its default date range was just the current day. So whenever no one opened the app, `callrail_leads` drifted and accumulated gaps. This change makes the function callable by an unattended scheduler with the platform's service-role credential and changes the no-argument behavior to pull the last 24 hours, so a scheduled invocation needs no body computation.
+
+### Database
+
+- None. The cron job itself is configured outside this change (Supabase Studio / manual `cron.schedule`), so it deliberately ships no migration.
+
+### Frontend
+
+- None. UI calls that omit dates simply pick up the new last-24-hours default automatically.
+
+### Edge function (the actual work)
+
+- [callrail-pull/index.ts](supabase/functions/callrail-pull/index.ts) now accepts the project's `SUPABASE_SERVICE_ROLE_KEY` as a bearer in place of a user JWT: when the bearer is an *exact* match for the service-role key, the `auth.getUser` check is skipped; otherwise the existing user-JWT path is unchanged.
+- Default date range when the request body omits `start_date` / `end_date` changes from "today only" to the last 24 hours, expressed as `start_date = yesterday (UTC)`, `end_date = today (UTC)`.
+- `handlePost` logs the caller class (`service` vs `user`) at the start for observability.
+- Risk noted in the proposal: the service-role bypass widens what the function trusts; mitigated by requiring an exact match against `SUPABASE_SERVICE_ROLE_KEY` rather than accepting any valid JWT.
+
+**New capability folder:** `callrail-ingest`.
+
+---
+
+## Foundational change completed this week
+
+The change below is the foundation the rest of the week's upload work depends on; it is now complete.
+
+### `gads-conversion-error-dispositions` — *complete*
 
 The foundational change the rest of the week's upload work depends on. The previous pipeline collapsed every Google response into "pending" or "failed" with errors truncated to 500 characters of free-form text. The result: structured error codes lost before they reached storage, transient errors marked permanent (and never retried), permanent config errors stayed "pending" and retried forever, and operators had no aggregate view of what was actually blocking uploads.
 

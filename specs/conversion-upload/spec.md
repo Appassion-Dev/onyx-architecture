@@ -1,4 +1,10 @@
-## MODIFIED Requirements
+# conversion-upload
+
+## Purpose
+
+Define the edge function that uploads pending conversions to Google Ads, persists per-batch request/response audit data, routes per-row failures by disposition, and maintains the lifecycle column in parallel with the legacy status column during the transition.
+
+## Requirements
 
 ### Requirement: Upload pending conversions to Google Ads
 
@@ -127,3 +133,54 @@ The partial-failure parser SHALL validate that every per-row error index from Go
 - **WHEN** the response contains one out-of-range per-row error and one valid per-row error
 - **THEN** the valid per-row error SHALL be recorded normally
 - **THEN** the upload run SHALL proceed with per-row outcome processing using the valid entries only
+
+### Requirement: Parallel writes preserve legacy status column
+
+For one release cycle, the edge function SHALL write the legacy `gads_conversion_uploads.status` column in parallel with the new `lifecycle` column. The mapping SHALL be:
+
+- `lifecycle = 'queued'` → `status = 'pending'`
+- `lifecycle = 'sending'` → `status = 'pending'`
+- `lifecycle = 'sent'` → `status = 'uploaded'`
+- `lifecycle = 'retrying'` → `status = 'pending'`
+- `lifecycle = 'needs-attention'` → `status = 'failed'`
+- `lifecycle = 'failed'` → `status = 'failed'`
+- `lifecycle = 'excluded'` → `status = 'skipped'`
+- `lifecycle = 'expired'` → `status = 'expired'`
+
+A database CHECK constraint SHALL enforce that any row with a non-NULL `lifecycle` has a `status` matching this mapping.
+
+#### Scenario: Every lifecycle write maps to a legacy status
+
+- **WHEN** the edge function writes any `lifecycle` value to a row
+- **THEN** the same UPDATE SHALL also write the mapped legacy `status` value
+- **THEN** the CHECK constraint SHALL accept the write
+
+#### Scenario: Out-of-spec write rejected
+
+- **WHEN** any process attempts to UPDATE a row with `lifecycle = 'sent'` and `status = 'pending'` simultaneously (out-of-spec)
+- **THEN** the database SHALL reject the write with a CHECK constraint violation
+
+#### Scenario: Historical rows with NULL lifecycle
+
+- **WHEN** an existing row has not yet been touched by the new edge function and has `lifecycle IS NULL`
+- **THEN** the CHECK constraint SHALL permit the row to exist (the mapping constraint applies only to rows with a non-NULL `lifecycle`)
+
+### Requirement: Backfill lifecycle for existing rows
+
+The migration introducing `lifecycle` SHALL backfill every existing row in `gads_conversion_uploads` from its current `status`:
+
+- `status = 'pending'` AND `upload_attempts = 0` → `lifecycle = 'queued'`
+- `status = 'pending'` AND `upload_attempts > 0` → `lifecycle = 'retrying'`
+- `status = 'uploaded'` → `lifecycle = 'sent'`
+- `status = 'skipped'` → `lifecycle = 'excluded'`
+- `status = 'failed'` → `lifecycle = 'failed'`
+- `status = 'expired'` → `lifecycle = 'expired'`
+
+Existing rows SHALL NOT have their `error_code`, `error_namespace`, `error_detail`, or `batch_id` populated by the backfill (the original structured code is unrecoverable from the truncated `error_message`).
+
+#### Scenario: Backfill produces consistent state
+
+- **WHEN** the migration runs against the production table
+- **THEN** every row SHALL have a non-NULL `lifecycle` value after the migration completes
+- **THEN** every row's `(lifecycle, status)` pair SHALL satisfy the CHECK constraint
+- **THEN** historical rows' `error_code` SHALL be NULL

@@ -1,6 +1,6 @@
 # May 11–17, 2026 — Changes Report
 
-A walkthrough of every OpenSpec change touched between May 11 and May 17 inclusive. Each entry notes status, then breaks the work down into what landed in the **database** (schema, views, functions, migrations) and in the **frontend** (Conversions page, hooks, components). Two changes (`conversion-attribution-overhaul` and `gads-conversion-error-dispositions`) are in-progress — they were *opened* this week; their bulk implementation lands the following week (see the May 18–24 report).
+A walkthrough of every OpenSpec change touched between May 11 and May 17 inclusive. Each entry notes status, then breaks the work down into what landed in the **database** (schema, views, functions, migrations) and in the **frontend** (Conversions page, hooks, components). `conversion-attribution-overhaul` is in-progress; `gads-conversion-error-dispositions`, also *opened* this week, has since been completed — its bulk implementation landed the following week (see the May 18–24 report).
 
 ---
 
@@ -22,7 +22,7 @@ Net state by Sunday: one concrete attribution loss was fixed and re-discovered, 
 
 ## May 13 — Closing a silent GCLID data-loss gap, and opening a much larger attribution overhaul
 
-### `tighten-gclid-attribution-window` — *archived*
+### `tighten-gclid-attribution-window` — *complete*
 
 The discovery phase picked GCLIDs for qualified and converted leads using `ORDER BY first_seen_at ASC LIMIT 1` — deliberately choosing the *oldest* known click for a customer. Correct for first-touch attribution, except when that oldest click pre-dated the conversion event beyond Google Ads' `click_through_lookback_window_days`. Those rows never uploaded successfully and never expired — they accumulated retries indefinitely, were invisible to the existing 90-day recency expiry, and represented silent conversion data loss.
 
@@ -71,7 +71,7 @@ Note: qualified and converted events will fire earlier in the funnel after this 
 
 ## May 14 — Cleaning the house before the next renovation
 
-**`refactor-conversions-page`** — *archived*
+**`refactor-conversions-page`** — *complete*
 
 `horizon-dashboard/src/components/pages/ConversionsPage.tsx` had grown to **2,040 lines / ~92 KB** in a single file — ~25 inline components, ~10 pure helpers, 4 row-detail data widgets (each with its own `useQuery`), 5 pieces of page state, and ~470 lines of JSX. The next planned wave (table-structure changes, hook swaps, new pipeline stages) was blocked by the monolith: every change forced a scroll through the whole file, made diffs noisy, and risked unrelated regressions. Refactoring first kept the behavioral PRs small and bisectable.
 
@@ -96,7 +96,7 @@ Note: qualified and converted events will fire earlier in the funnel after this 
 
 ## May 15 — Making upload errors operator-actionable (opened)
 
-**`gads-conversion-error-dispositions`** — *in progress*
+**`gads-conversion-error-dispositions`** — *complete*
 
 The current upload pipeline collapses every Google response into "pending" or "failed", with errors truncated to 500 characters of free-form text. The result: structured error codes are lost before they reach storage, transient errors get marked permanent (and never retry), permanent config errors stay "pending" and retry forever, and operators have no aggregate view of what's actually blocking uploads. This change was opened and specified this week; its full database, frontend, and edge-function implementation lands the following week (see the May 18–24 report).
 

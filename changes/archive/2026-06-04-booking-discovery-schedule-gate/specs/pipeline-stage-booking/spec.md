@@ -1,4 +1,4 @@
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Booking lead discovery criteria
 The system SHALL consider an estimate a booking lead based **solely** on a schedule gate: the estimate has a non-null `schedule.scheduled_start` (a `schedules` row with `scheduled_start IS NOT NULL` exists for the estimate) **AND** has at least one assigned employee (an `estimate_assignments` row exists for the estimate).
@@ -31,20 +31,6 @@ An estimate that already has a `gads_conversion_uploads` row with `conversion_ty
 #### Scenario: Already-uploaded estimate is not re-discovered
 - **WHEN** a `gads_conversion_uploads` row with `conversion_type = 'booking_lead'` already exists for the estimate
 - **THEN** the estimate SHALL NOT be discovered again
-
-### Requirement: Booking lead conversion value
-The system SHALL report `NULL` as the conversion value for booking lead conversions.
-
-#### Scenario: Booking lead value is null
-- **WHEN** a booking lead conversion is discovered
-- **THEN** the `conversion_value` SHALL be `NULL`
-
-### Requirement: Booking lead conversion datetime
-The system SHALL use `estimates.created_at` as the conversion datetime for booking lead conversions.
-
-#### Scenario: Booking lead datetime from estimate creation
-- **WHEN** a booking lead conversion is discovered
-- **THEN** the `conversion_datetime` SHALL equal `estimates.created_at`
 
 ### Requirement: Booking lead GCLID resolution
 The system SHALL resolve the GCLID as `COALESCE(booking_tags.gclid, callrail_leads.gclid, customer_gclids.gclid)`, preferring the booking-form GCLID, then the most-recent correlated CallRail GCLID, then the oldest (first-touch by `first_seen_at`) `customer_gclids` GCLID for the estimate's customer. GCLID resolution is independent of eligibility (it derives a value, it does not filter rows).

@@ -4,31 +4,31 @@
 The system SHALL discover qualified leads without requiring a prior `booking_lead` row in `gads_conversion_uploads` for the same estimate. The qualified stage is a fully independent detector.
 
 #### Scenario: Estimate with no booking_lead qualifies as qualified_lead
-- **WHEN** an estimate has at least one approved, priced `estimate_options` row but no `booking_lead` row in `gads_conversion_uploads`
+- **WHEN** an estimate is finalized (`work_status IN ('complete rated','complete unrated','created job from estimate')`) and has at least one priced `estimate_options` row (`total_amount > 0`) but no `booking_lead` row in `gads_conversion_uploads`
 - **THEN** the estimate SHALL be discovered as a pending `qualified_lead` conversion
 
 ### Requirement: Qualified lead discovery criteria
-The system SHALL consider an estimate as a qualified lead when at least one `estimate_options` row exists for that estimate with `approval_status IN ('approved','pro approved')` AND `total_amount > 0`. The estimate's own `work_status` is NOT consulted by this gate. An estimate with no approved-and-priced options SHALL NOT be discovered as qualified.
+The system SHALL consider an estimate as a qualified lead when BOTH conditions hold: (a) `estimates.work_status IN ('complete rated','complete unrated','created job from estimate')` (the estimate is finalized — its estimating visit completed or it was converted to a job), AND (b) at least one `estimate_options` row exists for that estimate with `total_amount > 0`. Option `approval_status` SHALL NOT be consulted. An estimate whose `work_status` is outside that set, or that has no priced option, SHALL NOT be discovered as qualified.
 
-#### Scenario: Estimate with an approved priced option qualifies regardless of work_status
-- **WHEN** an estimate has at least one `estimate_options` row with `approval_status IN ('approved','pro approved')` AND `total_amount > 0`
-- **THEN** the estimate SHALL be discovered as a pending `qualified_lead` conversion regardless of `estimates.work_status`
-
-#### Scenario: Estimate with `created job from estimate` work_status qualifies
-- **WHEN** an estimate has `work_status = 'created job from estimate'` and at least one option that is both approved (`approval_status IN ('approved','pro approved')`) and priced (`total_amount > 0`)
+#### Scenario: Estimate converted to a job qualifies
+- **WHEN** an estimate has `work_status = 'created job from estimate'` and at least one option with `total_amount > 0`
 - **THEN** the estimate SHALL be discovered as a pending `qualified_lead` conversion
 
-#### Scenario: Estimate with no priced options does not qualify
-- **WHEN** all `estimate_options` rows for an estimate have `total_amount IS NULL` or `total_amount = 0`, or no options exist
-- **THEN** the estimate SHALL NOT be discovered as a qualified lead
+#### Scenario: Completed estimate visit qualifies without an approved option
+- **WHEN** an estimate has `work_status IN ('complete rated','complete unrated')` and at least one priced option (`total_amount > 0`) but no option with `approval_status IN ('approved','pro approved')`
+- **THEN** the estimate SHALL be discovered as a pending `qualified_lead` conversion (approval is not consulted)
 
-#### Scenario: Estimate with priced but unapproved options does not qualify
-- **WHEN** all `estimate_options` rows for an estimate have `total_amount > 0` but no option has `approval_status IN ('approved','pro approved')`
-- **THEN** the estimate SHALL NOT be discovered as a qualified lead
+#### Scenario: In-flight estimate does not qualify
+- **WHEN** an estimate has `work_status IN ('needs scheduling','scheduled','in progress')` even with a priced option
+- **THEN** the estimate SHALL NOT be discovered as qualified
 
-#### Scenario: Estimate with non-complete work_status now qualifies if approved and priced
-- **WHEN** an estimate has `work_status` such as `'needs scheduling'`, `'scheduled'`, or `'in progress'` and has at least one approved priced option
-- **THEN** the estimate SHALL be discovered as a pending `qualified_lead` conversion
+#### Scenario: Cancelled estimate does not qualify
+- **WHEN** an estimate has `work_status IN ('user canceled','pro canceled')`
+- **THEN** the estimate SHALL NOT be discovered as qualified
+
+#### Scenario: Finalized estimate with no priced option does not qualify
+- **WHEN** an estimate is finalized (`work_status` in the allowed set) but all its `estimate_options` rows have `total_amount IS NULL` or `total_amount = 0`, or it has no options
+- **THEN** the estimate SHALL NOT be discovered as qualified
 
 ### Requirement: Qualified lead conversion value
 The system SHALL report the average of `total_amount / 100.0` across ALL estimate options (regardless of approval status) as the conversion value. When no options exist, the value SHALL be `0`.

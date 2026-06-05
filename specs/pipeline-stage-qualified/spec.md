@@ -46,11 +46,19 @@ The system SHALL report the average of `total_amount / 100.0` across ALL estimat
 - **THEN** the conversion value SHALL be `0`
 
 ### Requirement: Qualified lead conversion datetime
-The system SHALL use `estimates.updated_at` as the `conversion_datetime` for qualified lead conversions. This field captures the moment the estimate's work_status was last changed — which is the transition to complete.
+The system SHALL use the estimate's `work_timestamps.completed_at` as the `conversion_datetime` for qualified lead conversions when a non-NULL value is present, and SHALL fall back to `estimates.updated_at` otherwise. `completed_at` is stored as `timestamp without time zone` holding HCP's UTC value, so it SHALL be interpreted as UTC (`completed_at AT TIME ZONE 'UTC'`) to yield a `timestamptz` compatible with the fallback and the return type. Because `completed_at` is the literal visit-completion signal, it is preferred over `updated_at` (a lagging proxy) wherever it exists; `updated_at` guarantees 100% coverage so a value is always produced.
 
-#### Scenario: Datetime reflects estimate completion timestamp
-- **WHEN** a qualified lead is discovered for an estimate with `work_status = 'complete rated'`
+#### Scenario: Datetime uses completed_at when present
+- **WHEN** a qualified lead is discovered for an estimate that has a `work_timestamps` row with a non-NULL `completed_at`
+- **THEN** `conversion_datetime` SHALL equal that `completed_at` interpreted as UTC
+
+#### Scenario: Datetime falls back to updated_at when no completed_at
+- **WHEN** a qualified lead is discovered for an estimate that has no `work_timestamps` row, or whose `work_timestamps` row has a NULL `completed_at`
 - **THEN** `conversion_datetime` SHALL equal `estimates.updated_at`
+
+#### Scenario: Pending rows order by the conversion datetime
+- **WHEN** pending qualified conversions are returned
+- **THEN** they SHALL be ordered ascending by the same coalesced expression used for `conversion_datetime` (`completed_at` interpreted as UTC, else `updated_at`)
 
 ### Requirement: Qualified lead GCLID resolution
 The system SHALL resolve the GCLID with an inline subquery against the `customer_gclids` table using the estimate's `customer_id`, restricted to entries with `first_seen_at >= estimates.updated_at - INTERVAL '90 days'`, ordered by `first_seen_at ASC` (earliest in-window first-touch), taking the first match. If no in-window entry exists, GCLID SHALL be NULL and the row is still discovered.

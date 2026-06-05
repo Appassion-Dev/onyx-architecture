@@ -1,3 +1,7 @@
+## Purpose
+
+Defines when and how the Google Ads pipeline discovers a `converted_lead` conversion: the third and final stage of the pipeline, representing a customer who has accepted a quote and transitioned to a booked job.
+
 ## Requirements
 
 ### Requirement: Converted lead discovery is independent of booking_lead stage
@@ -8,37 +12,37 @@ The system SHALL discover converted leads without requiring a prior `booking_lea
 - **THEN** the estimate SHALL be discovered as a pending `converted_lead` conversion
 
 ### Requirement: Converted lead discovery criteria
-The system SHALL consider an estimate as a converted lead when at least one `estimate_options` row has `approval_status IN ('approved', 'pro approved')`.
+The system SHALL consider an estimate as a converted lead when at least one `estimate_options` row has `approval_status IN ('approved', 'pro approved')` AND at least one job exists linked to that option via `jobs.original_estimate_id = estimate_options.id`.
 
-#### Scenario: Estimate with approved option qualifies
-- **WHEN** an estimate has at least one `estimate_options` row with `approval_status = 'approved'`
+#### Scenario: Estimate with approved option and linked job qualifies
+- **WHEN** an estimate has at least one `estimate_options` row with `approval_status IN ('approved', 'pro approved')` and that option is the `original_estimate_id` of a job
 - **THEN** the estimate SHALL be discovered as a pending `converted_lead` conversion
 
-#### Scenario: Estimate with pro-approved option qualifies
-- **WHEN** an estimate has at least one `estimate_options` row with `approval_status = 'pro approved'`
-- **THEN** the estimate SHALL be discovered as a pending `converted_lead` conversion
+#### Scenario: Approved option exists but no linked job does not qualify
+- **WHEN** an estimate has an approved option but no job references that option via `jobs.original_estimate_id`
+- **THEN** the estimate SHALL NOT be discovered as a converted lead
 
-#### Scenario: Estimate with only non-approved options does not qualify
-- **WHEN** all `estimate_options` rows have `approval_status IN ('declined', 'pro declined', 'awaiting response', 'expired')` or `approval_status IS NULL`
+#### Scenario: Job exists but no approved option does not qualify
+- **WHEN** a job exists for an estimate option but no option on the estimate has `approval_status IN ('approved', 'pro approved')`
 - **THEN** the estimate SHALL NOT be discovered as a converted lead
 
 ### Requirement: Converted lead conversion value
-The system SHALL report the sum of `total_amount / 100.0` for estimate options with `approval_status IN ('approved', 'pro approved')` as the conversion value.
+The system SHALL report `jobs.total_amount / 100.0` as the conversion value, where `jobs.original_estimate_id` references the approved option.
 
-#### Scenario: Value is sum of approved options
-- **WHEN** an estimate has approved options totaling $3,200 (stored as 320000 cents)
-- **THEN** the conversion value SHALL be `3200.00`
+#### Scenario: Job subtotal used as value
+- **WHEN** a job linked to an approved option has `total_amount = 45000` (stored in cents)
+- **THEN** the conversion value SHALL be `450.00`
 
-#### Scenario: Declined options excluded from value
-- **WHEN** an estimate has one approved option ($2000) and one declined option ($800)
-- **THEN** the conversion value SHALL be `2000.00`
+#### Scenario: Job with zero total amount
+- **WHEN** a job linked to an approved option has `total_amount = 0`
+- **THEN** the conversion value SHALL be `0.00`
 
 ### Requirement: Converted lead conversion datetime
-The system SHALL use `MAX(estimate_options.updated_at)` where `approval_status IN ('approved', 'pro approved')` as the conversion datetime.
+The system SHALL use `jobs.created_at` as the conversion datetime, where `jobs.original_estimate_id` references the approved option.
 
-#### Scenario: Datetime from most recent approval
-- **WHEN** an estimate has two approved options, one updated at 2026-03-01 and one at 2026-03-15
-- **THEN** the `conversion_datetime` SHALL be `2026-03-15`
+#### Scenario: Datetime from job creation
+- **WHEN** a job is auto-created at `2026-04-15 14:23:00+00` for an approved option
+- **THEN** the `conversion_datetime` SHALL be `2026-04-15 14:23:00+00`
 
 ### Requirement: Converted lead GCLID resolution
 The system SHALL resolve the GCLID from the `customer_gclids` table using the estimate's `customer_id`, ordered by `first_seen_at ASC` (first-touch). If no entry exists for the customer, GCLID SHALL be NULL and the row is still discovered.

@@ -29,3 +29,19 @@
 
 - [x] 5.1 Run `supabase functions serve hcp-webhook --no-verify-jwt` and POST a sample payload; confirm it logs method/headers/body and both digest encodings without errors
 - [x] 5.2 Confirm a non-POST method returns `405` and an `OPTIONS` request returns CORS headers
+
+## 6. Finding: confirm digest encoding (resolved)
+
+- [x] 6.1 Inspect production `hcp-webhook` logs and confirm whether `Api-Signature` matches the hex or base64 digest → **confirmed lowercase hex** (`computedHex` == `Api-Signature` on 100% of June 2026 deliveries; base64 never matched)
+
+## 7. Switch to hex + enable enforcement
+
+- [x] 7.1 In `computeSignature`, rename `matchesBase64` → `matchesHex` in the `SignatureCheck` interface and compare the **hex** digest (lowercase) against `Api-Signature` in constant time; keep computing both hex and base64 for logging
+- [x] 7.2 Update the top-of-file comment block to state the encoding is confirmed hex and that the function hard-rejects on mismatch
+- [x] 7.3 In `handlePost`, after logging the signature check, return `401` when `matchesHex` is false (covers missing key, missing headers, and digest mismatch) and do NOT log the body or process the event for rejected requests
+- [x] 7.4 Keep the dual-encoding log line (hex + base64 + received signature + match result) so a future encoding change stays detectable; return `{ ok: true }` `2xx` only for verified requests
+
+## 8. Docs & verify
+
+- [x] 8.1 Update `README.md`: encoding resolved to hex, signature enforcement (`401` on mismatch) now enabled, replay-window still deferred
+- [x] 8.2 Type-check the function (`deno check`) and confirm a tampered/invalid signature yields `401` while a correctly signed body yields `2xx` (verified locally: valid hex → `200`, tampered/base64/no-headers → `401`)

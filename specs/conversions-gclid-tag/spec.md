@@ -16,29 +16,59 @@ Each estimate row in the Conversions pipeline table SHALL show a single "Source"
 - **THEN** the Source column shows a dash
 
 ### Requirement: GCLID count badge in its own column
-Each estimate row in the Conversions page SHALL include a dedicated "GCLID" column (separate from the Source column) displaying a `GCLID ×N` badge when one or more unique GCLIDs are present in `all_gclids`. When no GCLIDs exist, the column is empty.
+Each estimate row in the Conversions roll-up SHALL render, in the Method cell of
+the metric rail, exactly one upload-mechanism tag (or a dash) reflecting the
+Google Ads payload that the row's current stage would send. GCLID presence is
+read from the per-stage column `{stage}_gclid` (the stage resolved the same way
+the row resolves its lifecycle: the event's stage in all-stages mode, otherwise
+the active single-stage mode, defaulting to `booking`), falling back to
+`all_gclids` only when no stage-specific column applies. Customer-identifier
+presence is a non-empty `customer_email` OR `customer_mobile`. The tag is one of:
+- **GCLID+ECL** (light green) — stage GCLID present AND a customer identifier
+  present.
+- **GCLID** (purple) — stage GCLID present, no customer identifier. (Defined for
+  completeness; does not occur in practice.)
+- **ECL** (light blue) — no stage GCLID, customer identifier present.
+- a dash (`—`) — neither present.
 
-#### Scenario: No GCLIDs present
-- **WHEN** `all_gclids` is NULL or empty
-- **THEN** the GCLID column is empty
+The legacy single `GCLID ×N` count badge is replaced by these tags.
 
-#### Scenario: Single GCLID present
-- **WHEN** `all_gclids` contains one entry
-- **THEN** the GCLID column shows a badge reading "GCLID ×1"
+#### Scenario: GCLID and identifier both present
+- **WHEN** the row's resolved stage GCLID is non-null AND `customer_email` or
+  `customer_mobile` is non-empty
+- **THEN** the Method cell SHALL show a light-green "GCLID+ECL" tag
 
-#### Scenario: Multiple GCLIDs present
-- **WHEN** `all_gclids` contains N entries (N > 1)
-- **THEN** the GCLID column shows a badge reading "GCLID ×N"
+#### Scenario: GCLID present, no identifier
+- **WHEN** the row's resolved stage GCLID is non-null AND both `customer_email`
+  and `customer_mobile` are empty
+- **THEN** the Method cell SHALL show a purple "GCLID" tag
+
+#### Scenario: Identifier only, no GCLID
+- **WHEN** the row's resolved stage GCLID is null AND `customer_email` or
+  `customer_mobile` is non-empty
+- **THEN** the Method cell SHALL show a light-blue "ECL" tag
+
+#### Scenario: Neither present
+- **WHEN** the row's resolved stage GCLID is null AND both `customer_email` and
+  `customer_mobile` are empty
+- **THEN** the Method cell SHALL show a dash
 
 ### Requirement: Column headers match data columns
 The `PipelineHeader` component SHALL include a "Source" header (w-16) and a separate "GCLID" header (w-20) aligned with their respective data columns.
 
 ### Requirement: GCLID tooltip on hover
-The GCLID badge SHALL show a tooltip on hover that lists all GCLID values from `all_gclids`, one per line, in monospace font.
+The "GCLID+ECL" and "GCLID" tags SHALL show a tooltip on hover that lists all
+GCLID values from `all_gclids`, one per line, in monospace font. The "ECL" tag
+(no GCLID) SHALL NOT show a GCLID tooltip.
 
-#### Scenario: Tooltip on hover
-- **WHEN** user hovers over the GCLID badge
-- **THEN** a tooltip appears listing each GCLID value on a separate line in monospace font
+#### Scenario: Tooltip on a GCLID-bearing tag
+- **WHEN** the user hovers over a "GCLID+ECL" or "GCLID" tag
+- **THEN** a tooltip appears listing each `all_gclids` value on a separate line
+  in monospace font
+
+#### Scenario: No GCLID tooltip on ECL-only tag
+- **WHEN** the row shows an "ECL" tag
+- **THEN** no GCLID tooltip SHALL be shown
 
 ### Requirement: Combined GCLID source in view
 The `vw_conversion_candidates` view SHALL expose an `all_gclids` column containing a deduplicated array of all GCLIDs from both `booking_tags` (where `key = 'gclid'`) and `callrail_leads.gclid` for the estimate. NULL values are excluded.

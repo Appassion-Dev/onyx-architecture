@@ -31,11 +31,11 @@ HCP's docs specify the signature body as `timestamp + "." + json_payload`. We us
 **2. HMAC is computed over the raw request body string, never a re-serialized payload.**
 The handler reads `await req.text()` once and hashes that exact string. We do *not* `JSON.parse` → `JSON.stringify` before hashing, because re-serialization can reorder keys / change whitespace and break the signature. HCP's phrase "JSON representation of the payload" is interpreted as the bytes as transmitted. Alternative (re-stringify) rejected as fragile and signature-breaking.
 
-**3. Default the digest encoding to base64, but log both to confirm.**
-HCP's docs say "a cryptographic hash" without specifying hex vs base64. We default the comparison to **base64**: it matches the encoding already used by this project's `callrail-webhook` function, so it's the most likely scheme for this codebase. To avoid silently rejecting all traffic if the guess is wrong, phase 1 still logs the locally computed HMAC in **both** encodings next to the received `Api-Signature`. The first real delivery confirms base64 (or reveals hex, in which case we flip the default). Alternative (assume hex like Stripe/GitHub) rejected — base64 is the better prior here given callrail.
+**3. Default the digest encoding to base64, but log both to confirm. — RESOLVED: HCP uses lowercase hex.**
+HCP's docs say "a cryptographic hash" without specifying hex vs base64. Phase 1 defaulted the comparison to **base64** (matching `callrail-webhook`) while logging the locally computed HMAC in **both** encodings next to the received `Api-Signature`. Production deliveries (June 2026, e.g. `customer.updated`, `invoice.*`) resolved it: `computedHex` matched `Api-Signature` exactly on every request, while `matchesBase64` was always `false`. Example: received `6d0d6bdf…48649a94` == `computedHex` `6d0d6bdf…48649a94`. The base64 prior was wrong; **the confirmed encoding is lowercase hex.** This change flips the comparison to hex.
 
-**4. Verify against base64, but phase 1 still logs rather than hard-rejecting.**
-The function computes the base64 comparison result and logs it, but in phase 1 it still logs the payload regardless of match, so we can observe traffic even if the base64 assumption turns out wrong. Because base64 is only a strong default (not confirmed), the dual-encoding log (decision #3) is the safety net: if base64 never matches but hex does, we flip the default before enabling enforcement. Once a real delivery confirms base64, hard `401`-on-mismatch enforcement is turned on (a fast follow). This is an explicit, temporary phase-1 stance, called out in the README and tasks.
+**4. ~~Verify against base64, but phase 1 still logs rather than hard-rejecting.~~ — Enforcement now enabled (hex).**
+Phase 1 logged the payload regardless of match so traffic could be observed even if the encoding guess was wrong; that safety net (the dual-encoding log) did its job and revealed hex. With the encoding confirmed, the function now compares the **hex** digest in constant time and hard-rejects mismatches with `401`, logging the request body only for verified requests. A missing signing key or absent signature headers are treated as a failed match → `401`. The dual-encoding log line is retained so any future encoding change by HCP remains detectable.
 
 **5. Public function, `verify_jwt = false`.**
 External webhooks cannot present a Supabase JWT; authenticity comes from the HMAC. This matches `callrail-webhook` and the documented project convention for webhook endpoints.
@@ -62,5 +62,5 @@ Rollback: remove the HCP webhook subscription and/or disable the function in `co
 
 ## Open Questions
 
-- Digest encoding: defaulted to base64 (matches `callrail-webhook`); confirmed or flipped by the first real delivery's logs.
-- Does HCP retry on non-2xx? (Affects whether soft-fail in phase 1 causes retries — to confirm from HCP behavior, not blocking.)
+- ~~Digest encoding: defaulted to base64 (matches `callrail-webhook`); confirmed or flipped by the first real delivery's logs.~~ **Resolved: lowercase hex** (see decision #3).
+- Does HCP retry on non-2xx? (Now relevant since enforcement returns `401` on mismatch — a misconfigured signing key would cause HCP to retry/disable. To confirm from HCP behavior, not blocking. The signing key is verified present in production.)

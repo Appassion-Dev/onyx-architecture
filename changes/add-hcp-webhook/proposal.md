@@ -6,10 +6,12 @@ HousecallPro can push real-time events (jobs, leads, estimates, invoices, custom
 
 - Add a new public Supabase edge function `hcp-webhook` that receives HCP webhook POSTs.
 - Add a `HCP_WEBHOOK_SIGNING_KEY` environment secret used to verify request authenticity.
-- Verify HCP's timestamped HMAC-SHA256 signature: read the `Api-Timestamp` and `Api-Signature` headers, compute `HMAC-SHA256(secret, "${Api-Timestamp}.${rawBody}")`, and compare against `Api-Signature` in constant time. Reject mismatches with `401`.
-- Log each incoming request (method, headers with the signature/secret redacted, raw body, parsed body) plus the locally computed HMAC in **both hex and base64** alongside the received `Api-Signature`, so the first genuine HCP delivery resolves which digest encoding HCP uses.
+- Verify HCP's timestamped HMAC-SHA256 signature: read the `Api-Timestamp` and `Api-Signature` headers, compute `HMAC-SHA256(secret, "${Api-Timestamp}.${rawBody}")`, and compare the **hex**-encoded digest against `Api-Signature` in constant time. Reject mismatches with `401`.
+- Log each verified request (method, headers with the secret excluded, raw body, parsed body) plus the locally computed HMAC in **both hex and base64** alongside the received `Api-Signature` and the match result, keeping verification observable and any future encoding change detectable.
 - Register the function with `verify_jwt = false` in `config.toml` (authenticated by HMAC, not JWT), mirroring `callrail-webhook`.
 - Add a README documenting the endpoint, the required secret, and local testing.
+
+**Finding (resolved):** Phase 1 ran log-only with the digest comparison defaulted to base64 (matching `callrail-webhook`) while logging both encodings. Production HCP deliveries (June 2026) showed `computedHex` matching `Api-Signature` on 100% of requests and base64 never matching. The encoding is therefore confirmed as **lowercase hex**; this change flips the comparison to hex and enables `401` enforcement (the fast follow the Phase 1 design named).
 
 Explicitly **out of scope** for this change (deferred to a later phase):
 

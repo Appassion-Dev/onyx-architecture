@@ -676,8 +676,8 @@ One row per estimate with any lead signal. Columns include:
 - Customer identifiers: `customer_email`, `customer_mobile`, `customer_street`, `customer_city`, `customer_state`, `customer_zip` — used to compute the dashboard's `with_gclid` / `user_data_only` / `none` method classifier and to populate the expanded detail panel
 - Call aggregation columns from correlated `callrail_leads`
 
-**`export_converted_leads(p_from_date, p_to_date)` RPC:**  
-Used by ConversionsPage "Export CSV". Returns one row per converted estimate in the date range with: estimate id/number, customer name/email/phone, channel, lead source, first-touch medium, all GCLIDs, CallRail source/campaign, per-stage `(status, gclid, value, conversion_action, conversion_datetime, uploaded_at, error_message, upload_attempts)`, plus assigned employee, job id, job work status, job total, invoice number.
+**Google Ads template CSV export (client-side):**  
+ConversionsPage "Export CSV" and the month/week header download icons build a shared template CSV (`Email, Phone Number, Conversion Name, Conversion Time, Conversion Value, Conversion Currency, Google Click ID, JSON Sent, JSON Echo, Error`) in `exportUploadsCsv.ts`. On click it fetches `vw_gads_upload_payload_slices` by estimate-id chunks and merges with in-memory pipeline rows (email/phone); conversion names come from `gads_conversion_config.conversion_action_name`. Month/week exports mirror the group's mode-filtered display (hidden in pre-discovery mode); the page-level export covers all conversion types for the full 90-day window. The former `export_converted_leads(timestamptz, timestamptz)` RPC was dropped (`20260611000001`).
 
 ---
 

@@ -12,6 +12,7 @@ This proposal is a **research-phase register**: a single place to capture known 
 - Document **Issue #3 (Cross #7454)**: a second concrete instance of the same repeat-customer pattern as Issue #2, with the added wrinkle that all three stages (not just booking) will resolve out-of-window once they fire. Captured to confirm Issue #2 is not a one-off and to make the "all stages can expire" variant explicit.
 - Document **Issue #4 (Lowe #7428)**: a second concrete instance of the CallRail "most-recent estimate" tiebreak from Issue #1, manifesting as a *channel* mis-classification rather than a funnel split — calls preceding a booking-form estimate by ~3 minutes were bound to a sibling estimate created two days later, leaving #7428 falling through to `channel = 'Other'` in `vw_conversion_candidates` instead of `GLS`.
 - Document **Issue #5 (Osmanski #7864)**: a *discovery-before-correlation race* — a fresh, correct GCLID from two CallRail calls was present in the data, but `booking_lead` discovery fired in the ~15-minute window after the estimate became scheduled+assigned yet before the calls were correlated and the `customer_gclids` prepass ran. All three COALESCE sources resolved NULL, the once-ever discovery guard then froze the row at `gclid = NULL`, and it uploaded gclid-less. A new root cause: not a wrong-estimate tiebreak (#1/#4) and not an out-of-window GCLID (#2/#3).
+- Document **Issue #6 (Martija #7865)**: a *value-frozen-at-discovery* case — the `qualified_lead` conversion value is snapshotted by discovery as `AVG(estimate_options.total_amount)/100` the moment the estimate completes, and the once-ever `ON CONFLICT DO NOTHING` guard plus a value-blind uploader mean a price edit made an hour later never propagates. Google received $1,260 for an option now priced $4,990. Same "frozen-at-discovery, once-ever guard" family as Issue #5, but a different frozen field (`conversion_value`, not `gclid`), a different stage (`qualified_lead`), and a different failure mode: the snapshot was *correct when taken* and the source data changed afterward, so settle-delay fixes don't apply.
 - Explicitly defer implementation: no `tasks.md`, no `specs/` deltas, no code edits in this phase.
 
 ## Known Issues
@@ -180,6 +181,41 @@ In short: correlation eventually lands correctly, but discovery and GCLID resolu
 - Does Google's enhanced-conversion / identifier-based matching recover campaign attribution for these gclid-less booking leads, or is click-level attribution fully lost?
 - Should `booking_lead` discovery and GCLID resolution be decoupled — eligibility once-ever, GCLID re-resolvable until the row is actually sent?
 - Is the HCP import resetting `is_booking_form` to `false` on booking-form estimates a separate data-integrity bug worth its own entry, independent of this attribution race?
+
+### Issue #6 — Qualified-lead value frozen at discovery; option repriced afterward uploads stale value (Martija #7865)
+
+**Symptom.** For customer `cus_35c73da6203848339991d0a712d7bf60` (Kerien Martija), estimate **#7865** (`csr_6aa510a2c838474591992676996eb29d`, `work_status = complete unrated`) has its `qualified_lead` conversion (`gads_conversion_uploads.id = 14535`) uploaded with **`conversion_value = 1260`**, while the estimate's single option is priced **$4,990** (`total_amount = 499000` cents). The upload was fully successful (`status = 'uploaded'`, `lifecycle = 'sent'`, fresh in-window GCLID, batch accepted 5/5, HTTP 200) — unlike Issues #1–#5 nothing failed, expired, or landed on the wrong estimate. Google simply received a value ~4× lower than the option's price, because the price was edited *after* discovery snapshotted it.
+
+**Evidence (live data, 2026-06).**
+- #7865 created `2026-06-10 13:06:35`; appointment completed `2026-06-11 12:36:31` (`work_timestamps.completed_at`, matching the row's `conversion_datetime` exactly; the estimate's own `updated_at` is `2026-06-10 13:19:27`, so the datetime came from the work-timestamp branch of the COALESCE).
+- Single `estimate_options` row (`est_457dbdd887ae47dabba9d944336f2d9a`, "Option #1"): `total_amount = 499000`, `status = 'submitted for signoff'`, **`updated_at = 2026-06-11 13:39:18`** — the reprice landed between discovery and upload.
+- `gads_conversion_uploads` row 14535: `conversion_value = 1260.0000000000000000` — *exactly* `126000 / 100`, i.e. a single option priced **$1,260** at snapshot time. The AVG math being exact is the smoking gun; there is no option-price history table to show the prior value directly.
+- `cron.job_run_details` (jobid 28, `discover_pending_conversions()`, `*/15`): runs at `12:30`, `12:45`, `13:00`, `13:15`, `13:30`, `13:45`, `14:00` on 2026-06-11, all succeeded. The estimate became eligible at 12:36:31; row ID ordering (14535 precedes 14536, whose `conversion_datetime` is `13:11:58` and was inserted by the 13:15 run) pins the insert to the **12:45 or 13:00 run** — before the 13:39:18 reprice.
+- Upload batch `3787cc3e-f663-4556-b3a7-f4d7ee96604e` (`sent_at = 2026-06-11 14:00:01`, hourly jobid 29): `request_body` contains `"conversionValue": 1260, "currencyCode": "USD", "orderId": "csr_6aa510a2…"` — Google accepted $1,260.
+- No `converted_lead` row exists yet (option not approved); when it fires it will recompute from the then-current option set, so the *converted* stage would self-correct — the stale value is specific to the qualified stage.
+
+**Root cause — value snapshotted once-ever at discovery, never re-read.** Same architectural defect as [Issue #5](#issue-5--fresh-gclid-present-but-booking-lead-uploaded-gclid-less-discovery-fired-before-call-correlation-osmanski-7864)'s "frozen-at-discovery" guard, applied to a different field:
+1. **Discovery computes the value inline.** `get_pending_qualified_lead_conversions()` returns `COALESCE(AVG(eo.total_amount)/100, 0)` evaluated at detection time, and `discover_pending_conversions()` writes it into the queue row with `ON CONFLICT (estimate_id, conversion_type) DO NOTHING` — the row is never revisited.
+2. **The reprice arrived after the snapshot.** The appointment completed 12:36:31 with the option at $1,260; discovery (12:45/13:00) froze that value; the rep repriced to $4,990 at 13:39:18 ("submitted for signoff").
+3. **The uploader is value-blind.** `pickup.ts` reads the frozen `conversion_value` straight off the row; the hourly 14:00 run sent the stale $1,260.
+
+Distinct from Issue #5 in failure mode, not just field: there the correct data *existed but hadn't been linked yet* (a settle delay or tick reordering shrinks the race); here the snapshot was **correct when taken and the source changed afterward**. Post-appointment repricing is normal sales workflow, so no grace window eliminates this — only making value resolution repeatable (or restating after the fact) does.
+
+**Blast radius.** Not yet quantified (open question below). The harm is **monetary, not attributional**: a wrong `conversionValue` feeds Google's value-based bidding — here a 4× understatement; an edit in the other direction would overstate. Unlike Issues #1–#5 the damage is invisible in the dashboard: the row reads `uploaded`/`sent`, i.e. success. Candidate population: any estimate whose option prices change between appointment completion (+ ≤15-min discovery) and… ever — the divergence is permanent. The same mechanism applies to `converted_lead` values if options are edited after approval-time discovery.
+
+**Does migration `20260526000002` fix this? No.** It only adds a repeat-customer GCLID branch to *booking* discovery; it touches neither value computation nor re-resolution.
+
+**Candidate solutions (for later evaluation — not committed).**
+- *Re-resolve `conversion_value` at upload time.* Generalize Issue #5's "re-resolve at upload" candidate: for still-`queued` value-bearing rows, recompute `AVG(estimate_options.total_amount)/100` at send time (the pickup query already joins `estimates`). Closes the discovery→upload gap (here ~1 h) but not post-upload edits.
+- *Restate after the fact via Google Ads conversion adjustments.* Upload a `RESTATEMENT` adjustment keyed on `orderId` (= estimate ID) when a sent row's value diverges from the current option average. The only mechanism that catches edits made *after* upload; value restatements exist in Google's API where GCLID fixes do not. Could remediate #7865 itself ($1,260 → $4,990).
+- *Backfill pass in discovery.* Before the once-ever insert, `UPDATE` still-queued value-bearing rows whose stored value diverges from the current recomputation — value resolution becomes idempotent while eligibility stays once-ever (mirrors Issue #5's backfill candidate).
+- *Accept + document only.* If most repricing happens before completion or the aggregate value drift is small, accept and document.
+
+**Open questions.**
+- Blast radius survey: how many sent `qualified_lead` / `converted_lead` rows have `conversion_value` ≠ the current `AVG(estimate_options.total_amount)/100` for their estimate, and what is the aggregate dollar drift? (Direct sizing for both the upload-time fix and the restatement backlog.)
+- Does the qualified-stage value materially drive bidding, or does `converted_lead` dominate value-based strategies? (If the latter, the converted stage's natural self-correction may cap the harm.)
+- Should value resolution — like Issue #5's GCLID resolution — be decoupled from once-ever eligibility and stay re-resolvable until the row is sent? (Shared design decision; the two issues should likely graduate together.)
+- Is `AVG` across all options (including $0 ones) the right value semantics for a qualified lead at all, or should it be e.g. the max/likely option? (Pre-existing design choice; surfaced here because the snapshot froze it.)
 
 ## Capabilities
 
